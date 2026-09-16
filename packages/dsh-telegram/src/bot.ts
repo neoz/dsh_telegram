@@ -74,8 +74,8 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     return
   }
   if (command === 'stop') {
-    const stopped = deps.agents.stop(chatId)
-    await deps.api.sendMessage(chatId, stopped ? 'Stopped.' : 'Nothing is running.')
+    // A cancelled turn reports "Stopped." on its own placeholder; only an idle agent needs a reply here.
+    if (!deps.agents.stop(chatId)) await deps.api.sendMessage(chatId, 'Nothing is running.')
     return
   }
 
@@ -131,17 +131,26 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   deps.log.info(`dsh-telegram: chat ${chatId} message ${message.message_id} -> ${result.outcome}`)
 }
 
-/** Serialises message handling per chat; a failing handler is logged and never blocks the next one. */
+/**
+ * Serialises message handling per chat so turns never overlap; commands bypass
+ * the queue so `/stop` and `/reset` act on the turn that is running. A failing
+ * handler is logged and never blocks the next one.
+ */
 export function createDispatcher(deps: BotDeps): (message: TelegramMessage) => void {
   const chains = new Map<number, Promise<void>>()
+  const report = (message: TelegramMessage) => (error: unknown) => {
+    deps.log.error(`dsh-telegram: message ${message.message_id} in chat ${message.chat.id} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+  }
   return (message) => {
     const chatId = message.chat.id
+    if (commandOf(message.text, deps.botUsername) !== undefined) {
+      void handleMessage(message, deps).catch(report(message))
+      return
+    }
     const previous = chains.get(chatId) ?? Promise.resolve()
     const next = previous
       .then(() => handleMessage(message, deps))
-      .catch((error: unknown) => {
-        deps.log.error(`dsh-telegram: message ${message.message_id} in chat ${chatId} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
-      })
+      .catch(report(message))
       .finally(() => {
         if (chains.get(chatId) === next) chains.delete(chatId)
       })

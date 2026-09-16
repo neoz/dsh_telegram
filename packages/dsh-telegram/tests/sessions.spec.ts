@@ -7,7 +7,7 @@ import { ChatAgents, type AgentRegistryLike } from '../src/sessions.ts'
 
 vi.mock('@deepseek-ai/dsh-agent', () => ({ installModelSelection: vi.fn() }))
 
-interface FakeAgent { id: string; status: 'idle' | 'running'; cancel: ReturnType<typeof vi.fn>; session: { header: { cwd: string } } }
+interface FakeAgent { id: string; status: 'idle' | 'running'; cancel: ReturnType<typeof vi.fn>; whenIdle: () => Promise<void>; session: { header: { cwd: string } } }
 
 function fakeRegistry() {
   const live = new Map<string, FakeAgent>()
@@ -18,7 +18,7 @@ function fakeRegistry() {
     failResume: false,
     get: (id: string) => live.get(id),
     create: vi.fn(async (options: { sessionId: string; meta?: { cwd?: string }; setup?: (ctx: unknown, agent: unknown) => void }) => {
-      const agent: FakeAgent = { id: options.sessionId, status: 'idle', cancel: vi.fn(), session: { header: { cwd: options.meta?.cwd ?? '' } } }
+      const agent: FakeAgent = { id: options.sessionId, status: 'idle', cancel: vi.fn(), whenIdle: async () => {}, session: { header: { cwd: options.meta?.cwd ?? '' } } }
       options.setup?.({}, agent)
       live.set(agent.id, agent)
       registry.created.push(options)
@@ -26,7 +26,7 @@ function fakeRegistry() {
     }),
     resume: vi.fn(async (options: { resumeSessionId: string; setup?: (ctx: unknown, agent: unknown) => void }) => {
       if (registry.failResume) throw new Error('corrupt log')
-      const agent: FakeAgent = { id: options.resumeSessionId, status: 'idle', cancel: vi.fn(), session: { header: { cwd: '/w/1' } } }
+      const agent: FakeAgent = { id: options.resumeSessionId, status: 'idle', cancel: vi.fn(), whenIdle: async () => {}, session: { header: { cwd: '/w/1' } } }
       options.setup?.({}, agent)
       live.set(agent.id, agent)
       registry.resumed.push(options)
@@ -100,6 +100,15 @@ describe('ChatAgents', () => {
     await agents.reset(1)
     expect(disposed).toEqual([agent.id])
     expect(map.get(1)).toBeUndefined()
+  })
+
+  it('reset cancels a running agent before disposing it', async () => {
+    const { agents, live, disposed } = await build()
+    const { agent } = await agents.resolve(1)
+    live.get(agent.id)!.status = 'running'
+    await agents.reset(1)
+    expect(live.get(agent.id)).toBeUndefined()
+    expect(disposed).toEqual([agent.id])
   })
 
   it('stop cancels only a running agent', async () => {

@@ -149,6 +149,13 @@ describe('runTurn', () => {
     expect(api.callsTo('editMessageText').at(-1)!.args[2]).toMatch(/timed out/)
   })
 
+  it('reports stopped when the turn was aborted', async () => {
+    const a = fakeAgent(emit => { emit(turnStart); emit(turnEnd({ kind: 'aborted', reason: { kind: 'user' } })) })
+    const result = await runTurn(options(a))
+    expect(result.outcome).toBe('stopped')
+    expect(api.callsTo('editMessageText').at(-1)!.args[2]).toBe('Stopped.')
+  })
+
   it('reports empty when the agent produced no text', async () => {
     const a = fakeAgent(emit => { emit(turnStart); emit(turnEnd({ kind: 'completed' })) })
     const result = await runTurn(options(a))

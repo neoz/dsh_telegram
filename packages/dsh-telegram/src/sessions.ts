@@ -110,7 +110,13 @@ export class ChatAgents {
     const handle = this.handles.get(chatId)
     this.handles.delete(chatId)
     await this.options.map.delete(chatId)
-    if (handle !== undefined) await handle.dispose()
+    if (handle === undefined) return
+    // Let a running turn wind down (and deliver its "Stopped.") before the agent goes away.
+    if (handle.agent.status === 'running') {
+      handle.agent.cancel({ kind: 'user' })
+      await handle.agent.whenIdle()
+    }
+    await handle.dispose()
   }
 
   stop(chatId: number): boolean {

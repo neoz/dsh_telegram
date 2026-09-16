@@ -96,7 +96,10 @@ describe('handleMessage', () => {
     expect(api.callsTo('sendMessage')[0]!.args[1]).toBe('Started a new conversation.')
     await handleMessage(msg({ text: '/stop@dshbot' }), deps)
     expect(agents.stop).toHaveBeenCalledWith(5)
-    expect(api.callsTo('sendMessage')[1]!.args[1]).toBe('Stopped.')
+    expect(api.callsTo('sendMessage')).toHaveLength(1)
+    agents.stop.mockReturnValueOnce(false)
+    await handleMessage(msg({ text: '/stop' }), deps)
+    expect(api.callsTo('sendMessage')[1]!.args[1]).toBe('Nothing is running.')
   })
 
   it('runs a turn: reacts, marks the turn, submits text, logs the reply', async () => {
@@ -145,5 +148,16 @@ describe('handleMessage', () => {
     releaseFirst()
     await new Promise(r => setTimeout(r, 5))
     expect(order).toEqual(['a-start', 'a-end', 'b-start'])
+  })
+
+  it('dispatcher runs /stop immediately while a turn is queued', async () => {
+    let releaseFirst!: () => void
+    agents.resolve.mockImplementationOnce(async () => { await new Promise<void>((r) => { releaseFirst = r }); throw new Error('boom') })
+    const dispatch = createDispatcher(deps)
+    dispatch(msg({ text: 'long task' }, 'private', 11))
+    dispatch(msg({ text: '/stop' }, 'private', 12))
+    await new Promise(r => setTimeout(r, 5))
+    expect(agents.stop).toHaveBeenCalledWith(5)
+    releaseFirst()
   })
 })

@@ -50,7 +50,7 @@ export interface TurnOptions {
   now?: () => number
 }
 
-export type TurnOutcome = 'edited' | 'sent' | 'document' | 'undelivered' | 'error' | 'timeout' | 'empty'
+export type TurnOutcome = 'edited' | 'sent' | 'document' | 'undelivered' | 'error' | 'timeout' | 'stopped' | 'empty'
 
 export interface TurnResult {
   outcome: TurnOutcome
@@ -58,11 +58,14 @@ export interface TurnResult {
   sentMessageId?: number
 }
 
-/** Last assistant text and any error reason inside the turn(s) since `firstSeq`. */
-export function summarizeTurn(session: TurnAgent['session'], firstSeq: number): { text: string; error?: string } {
+export interface TurnSummary { text: string; error?: string; aborted: boolean }
+
+/** Last assistant text, any error reason, and whether the turn was cancelled, since `firstSeq`. */
+export function summarizeTurn(session: TurnAgent['session'], firstSeq: number): TurnSummary {
   let started = false
   let text = ''
   let error: string | undefined
+  let aborted = false
   for (let seq = firstSeq; seq < session.seq; seq++) {
     const event = session.eventAt(seq as SessionSeq)
     if (event === undefined) continue
@@ -75,12 +78,13 @@ export function summarizeTurn(session: TurnAgent['session'], firstSeq: number): 
       const joined = event.data.message.content.flatMap(b => (b.type === 'text' ? [b.text] : [])).join('')
       if (joined !== '') text = joined
     }
-    if (event.type === 'turn/end' && event.data.reason.kind === 'error') {
-      const reason = event.data.reason as { kind: 'error'; error: { code: string; message: string } }
-      error = `${reason.error.code}: ${reason.error.message}`
+    if (event.type === 'turn/end') {
+      const reason = event.data.reason as { kind: string; error?: { code: string; message: string } }
+      if (reason.kind === 'error' && reason.error !== undefined) error = `${reason.error.code}: ${reason.error.message}`
+      if (reason.kind === 'aborted') aborted = true
     }
   }
-  return error === undefined ? { text } : { text, error }
+  return { text, aborted, ...(error === undefined ? {} : { error }) }
 }
 
 /** Throttled placeholder editor that never repeats the visible text. */
@@ -224,6 +228,10 @@ export async function runTurn(options: TurnOptions): Promise<TurnResult> {
   if (summary.error !== undefined) {
     await placeholder.replace(`Error: ${summary.error}`)
     return { outcome: 'error', text: summary.text, sentMessageId: placeholderId }
+  }
+  if (summary.aborted) {
+    await placeholder.replace('Stopped.')
+    return { outcome: 'stopped', text: summary.text, sentMessageId: placeholderId }
   }
   if (summary.text === '') {
     await placeholder.replace('(no reply)')
