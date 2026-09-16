@@ -25,7 +25,7 @@ export const name = 'dsh-telegram'
 /** Services required before the bot starts. */
 export const inject = ['agents', 'tools', 'attachments', 'loader']
 
-interface Started { runner: RunnerHandle; agents: ChatAgents }
+interface Started { polling: Polling; agents: ChatAgents }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -85,13 +85,39 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   bot.on('message', (update) => { dispatch(update.message as unknown as TelegramMessage) })
   bot.catch((error) => { log.error(`dsh-telegram: update handler failed: ${String(error.error)}`) })
 
-  const runner = run(bot, { runner: { maxRetryTime: config.pollRetryMs, retryInterval: 'exponential' } })
-  // A polling failure that outlives the retry window must not take the dsh process down with it.
-  runner.task()?.catch((error: unknown) => {
-    log.error(`dsh-telegram: polling stopped: ${error instanceof Error ? error.message : String(error)}`)
-  })
+  const polling = startPolling(bot, config, log)
   log.info(`dsh-telegram: polling as @${bot.botInfo.username}`)
-  return { runner, agents }
+  return { polling, agents }
+}
+
+interface Polling { stop(): Promise<void> }
+
+/**
+ * Run the grammY runner and restart it after a polling failure. A failure that
+ * outlives the runner's own retry window (or a 409 from an overlapping instance)
+ * must neither take the dsh process down nor leave the bot silently dead.
+ */
+function startPolling(bot: Bot, config: Config, log: ReturnType<typeof loggerFor>): Polling {
+  let stopped = false
+  let runner: RunnerHandle | undefined
+  let restartTimer: NodeJS.Timeout | undefined
+  const launch = (): void => {
+    if (stopped) return
+    runner = run(bot, { runner: { maxRetryTime: config.pollRetryMs, retryInterval: 'exponential' } })
+    runner.task()?.catch((error: unknown) => {
+      if (stopped) return
+      log.error(`dsh-telegram: polling stopped (${error instanceof Error ? error.message : String(error)}); restarting in ${config.retry.maxDelayMs}ms`)
+      restartTimer = setTimeout(launch, config.retry.maxDelayMs)
+    })
+  }
+  launch()
+  return {
+    async stop() {
+      stopped = true
+      if (restartTimer !== undefined) clearTimeout(restartTimer)
+      if (runner?.isRunning()) await runner.stop()
+    },
+  }
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -102,8 +128,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {
     void start(ctx, config).then((result) => {
       if (stopped) {
-        void result.runner.stop()
-        void result.agents.disposeAll()
+        void result.polling.stop().then(() => result.agents.disposeAll())
         return
       }
       started = result
@@ -113,9 +138,9 @@ export function apply(ctx: Context, config: Config): void {
     return () => {
       stopped = true
       if (started === undefined) return
-      const { runner, agents } = started
+      const { polling, agents } = started
       started = undefined
-      void runner.stop().then(() => agents.disposeAll())
+      void polling.stop().then(() => agents.disposeAll())
     }
   }, 'dsh-telegram: bot runner')
 }
