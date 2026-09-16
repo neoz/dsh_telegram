@@ -46,6 +46,14 @@ describe('markdownToTelegramHTML', () => {
     expect(markdownToTelegramHTML(input)).toBe(want)
   })
 
+  it.each([
+    ['[my_repo](https://x.dev/a_b) and _later_', '<a href="https://x.dev/a_b">my_repo</a> and <i>later</i>'],
+    ['snake_case_name stays', 'snake_case_name stays'],
+    ['a _real italic_ here', 'a <i>real italic</i> here'],
+  ])('keeps links and identifiers intact: %j', (input, want) => {
+    expect(markdownToTelegramHTML(input)).toBe(want)
+  })
+
   it('escapes inline code content', () => {
     expect(markdownToTelegramHTML('run `echo <hello>`')).toContain('<code>echo &lt;hello&gt;</code>')
   })
