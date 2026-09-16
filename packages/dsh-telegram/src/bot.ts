@@ -79,6 +79,9 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     return
   }
 
+  // Telegram stamps `date` when the sender hit send; the gap to now is delivery lag outside this process.
+  const receivedAt = Date.now()
+  const lagMs = Math.max(0, receivedAt - message.date * 1000)
   const workspaceDir = deps.agents.workspaceFor(chatId)
   const inbound = await parseInbound(message, {
     api: deps.api, inboxDir: join(workspaceDir, 'inbox'), botId: deps.botId, botUsername: deps.botUsername,
@@ -104,6 +107,7 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     for (const ref of refs) content.push({ type: 'image', attachment: ref as never })
   }
 
+  const prepMs = Date.now() - receivedAt
   const result = await runTurn({
     api: deps.api,
     agent: resolved.agent,
@@ -128,7 +132,9 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
       bot: true,
     })
   }
-  deps.log.info(`dsh-telegram: chat ${chatId} message ${message.message_id} -> ${result.outcome}`)
+  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+  deps.log.info(`dsh-telegram: chat ${chatId} message ${message.message_id} -> ${result.outcome}`
+    + ` (lag ${seconds(lagMs)}, prep ${seconds(prepMs)}, agent ${seconds(result.timing.agentMs)}, deliver ${seconds(result.timing.deliverMs)})`)
 }
 
 /**

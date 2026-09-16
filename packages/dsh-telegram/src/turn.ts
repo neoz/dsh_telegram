@@ -56,6 +56,8 @@ export interface TurnResult {
   outcome: TurnOutcome
   text: string
   sentMessageId?: number
+  /** Wall-clock breakdown: agent work versus Telegram delivery. */
+  timing: { agentMs: number; deliverMs: number }
 }
 
 export interface TurnSummary { text: string; error?: string; aborted: boolean }
@@ -205,6 +207,7 @@ export async function runTurn(options: TurnOptions): Promise<TurnResult> {
 
   let timedOut = false
   let timer: NodeJS.Timeout | undefined
+  const agentStart = now()
   try {
     agent.followup(createUserMessage({ content: options.content, source: { kind: 'user' } }))
     const timeout = new Promise<void>((resolve) => {
@@ -219,8 +222,20 @@ export async function runTurn(options: TurnOptions): Promise<TurnResult> {
     if (timer !== undefined) clearTimeout(timer)
     unsubscribe()
   }
+  const agentMs = now() - agentStart
 
   const summary = summarizeTurn(agent.session, firstSeq)
+  const deliverStart = now()
+  const delivered = await deliver(options, placeholder, summary, timedOut)
+  return { ...delivered, timing: { agentMs, deliverMs: now() - deliverStart } }
+}
+
+type Delivery = Omit<TurnResult, 'timing'>
+
+/** Turn the summarized outcome into what the chat sees: placeholder text, a fresh message, or a document. */
+async function deliver(options: TurnOptions, placeholder: Placeholder, summary: TurnSummary, timedOut: boolean): Promise<Delivery> {
+  const { api, chatId, log } = options
+  const placeholderId = placeholder.messageId
   if (timedOut) {
     await placeholder.replace(`The reply timed out after ${Math.round(options.turnTimeoutMs / 1000)}s and was stopped.`)
     return { outcome: 'timeout', text: summary.text, sentMessageId: placeholderId }

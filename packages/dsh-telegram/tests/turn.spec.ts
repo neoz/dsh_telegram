@@ -63,6 +63,8 @@ describe('runTurn', () => {
     const edit = api.callsTo('editMessageText').at(-1)!.args
     expect(edit).toEqual([5, 100, '<b>done</b>', { parseMode: 'HTML' }])
     expect(result.sentMessageId).toBe(100)
+    expect(result.timing.agentMs).toBeGreaterThanOrEqual(0)
+    expect(result.timing.deliverMs).toBeGreaterThanOrEqual(0)
   })
 
   it('edits the placeholder with tool status and skips identical statuses', async () => {
