@@ -4,9 +4,10 @@ RUN corepack enable pnpm && corepack prepare pnpm@10.14.0 --activate
 COPY packages/dsh-telegram/package.json packages/dsh-telegram/pnpm-lock.yaml packages/dsh-telegram/.npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY packages/dsh-telegram/ ./
+# Production install without peers: dsh packages resolve from the dsh installation at runtime.
 RUN pnpm run build \
  && rm -rf node_modules \
- && pnpm install --prod --frozen-lockfile --ignore-scripts
+ && pnpm install --prod --no-frozen-lockfile --ignore-scripts --config.auto-install-peers=false
 
 FROM node:22-bookworm-slim
 ARG DSH_VERSION=0.1.5-rc.2
