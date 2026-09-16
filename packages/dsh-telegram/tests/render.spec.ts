@@ -151,7 +151,7 @@ describe('captionPrefix', () => {
 
 describe('summarizeToolCall', () => {
   it('shows the first string argument on one line', () => {
-    expect(summarizeToolCall('bash', '{"command":"ls -la\n/tmp"}', 60)).toBe('bash: ls -la /tmp')
+    expect(summarizeToolCall('bash', JSON.stringify({ command: 'ls -la\n/tmp' }), 60)).toBe('bash: ls -la /tmp')
   })
   it('falls back to the tool name on bad json', () => {
     expect(summarizeToolCall('read', '{oops', 60)).toBe('read')
