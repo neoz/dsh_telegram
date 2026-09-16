@@ -17,6 +17,7 @@ describe('Config', () => {
     expect(config.recentMessagesLimit).toBe(30)
     expect(config.statusEditIntervalMs).toBe(1000)
     expect(config.turnTimeoutMs).toBe(900_000)
+    expect(config.pollRetryMs).toBe(86_400_000)
     expect(config.retry).toEqual({ maxAttempts: 4, startDelayMs: 500, maxDelayMs: 8000, maxUploadMb: 20 })
   })
 

@@ -85,7 +85,11 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   bot.on('message', (update) => { dispatch(update.message as unknown as TelegramMessage) })
   bot.catch((error) => { log.error(`dsh-telegram: update handler failed: ${String(error.error)}`) })
 
-  const runner = run(bot)
+  const runner = run(bot, { runner: { maxRetryTime: config.pollRetryMs, retryInterval: 'exponential' } })
+  // A polling failure that outlives the retry window must not take the dsh process down with it.
+  runner.task()?.catch((error: unknown) => {
+    log.error(`dsh-telegram: polling stopped: ${error instanceof Error ? error.message : String(error)}`)
+  })
   log.info(`dsh-telegram: polling as @${bot.botInfo.username}`)
   return { runner, agents }
 }

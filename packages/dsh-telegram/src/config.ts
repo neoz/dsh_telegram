@@ -21,6 +21,8 @@ export interface Config {
   readonly recentMessagesLimit: number
   readonly statusEditIntervalMs: number
   readonly turnTimeoutMs: number
+  /** How long getUpdates keeps retrying after failures before the bot gives up. */
+  readonly pollRetryMs: number
   readonly retry: RetryConfig
 }
 
@@ -36,6 +38,7 @@ export const Config: z<Config> = z.object({
   recentMessagesLimit: z.number().min(0).default(30),
   statusEditIntervalMs: z.number().min(0).default(1000),
   turnTimeoutMs: z.number().min(1).default(900_000),
+  pollRetryMs: z.number().min(1).default(86_400_000),
   retry: z.object({
     maxAttempts: z.number().min(1).default(4),
     startDelayMs: z.number().min(0).default(500),
