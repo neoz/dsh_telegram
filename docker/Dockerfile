@@ -28,7 +28,7 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
  && mkdir -p /dsh-home /workspace /data \
  && chown -R node:node /dsh-home /workspace /data /opt/dsh-telegram
-USER node
+# Starts as root so the entrypoint can fix bind-mount ownership; it drops to node before exec.
 WORKDIR /workspace
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["dsh", "--profile", "telegram"]
