@@ -16,6 +16,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g @deepseek-ai/dsh@${DSH_VERSION}
 ENV DSH_HOME=/dsh-home
+# User skills live in the volume so they survive container recreation.
+ENV DSH_AGENTS_HOME=/dsh-home/.agents
 # The profile template lives outside the volume so image rebuilds refresh it.
 COPY profile/telegram/ /opt/dsh-telegram/profile/
 COPY --from=builder /build/package.json /build/cordis.patch.yml /opt/dsh-telegram/profile/node_modules/dsh-telegram/
