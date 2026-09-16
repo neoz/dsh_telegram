@@ -1,6 +1,8 @@
 services:
   dsh-telegram:
-    image: ghcr.io/neoz/dsh-telegram:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     env_file: .env
     environment:
       DSH_PERMISSION_MODE: danger-full-access
@@ -15,12 +17,10 @@ services:
 
   # Self-hosted metasearch behind web_search; not published outside the compose network.
   searxng:
-    image: searxng/searxng:latest
+    build: docker/searxng
     env_file: .env
     environment:
       SEARXNG_BASE_URL: http://searxng:8080/
-    volumes:
-      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
     restart: unless-stopped
 
 volumes:
