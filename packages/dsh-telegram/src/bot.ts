@@ -119,6 +119,7 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     messageSize: deps.config.messageSize,
     statusEditIntervalMs: deps.config.statusEditIntervalMs,
     turnTimeoutMs: deps.config.turnTimeoutMs,
+    status: deps.config.status,
     log: deps.log,
   })
 

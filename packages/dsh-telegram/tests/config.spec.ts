@@ -19,6 +19,21 @@ describe('Config', () => {
     expect(config.turnTimeoutMs).toBe(900_000)
     expect(config.pollRetryMs).toBe(86_400_000)
     expect(config.retry).toEqual({ maxAttempts: 4, startDelayMs: 500, maxDelayMs: 8000, maxUploadMb: 20 })
+    expect(config.status).toEqual({
+      thinking: 'Thinking...',
+      web: 'Searching the web...',
+      read: 'Reading files...',
+      write: 'Editing files...',
+      command: 'Running a command...',
+      send: 'Sending a file...',
+      other: 'Working...',
+    })
+  })
+
+  it('accepts partial status overrides', () => {
+    const config = Config({ ...minimal, status: { thinking: 'Hmm...' } })
+    expect(config.status.thinking).toBe('Hmm...')
+    expect(config.status.other).toBe('Working...')
   })
 
   it('rejects a missing bot token', () => {

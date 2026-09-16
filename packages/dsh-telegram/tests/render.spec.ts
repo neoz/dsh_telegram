@@ -10,8 +10,9 @@ import {
   renderMessage,
   repairHTMLTags,
   stripCollapse,
-  summarizeToolCall,
+  toolStatus,
 } from '../src/render.ts'
+import type { StatusLabels } from '../src/config.ts'
 
 describe('escapeHTML', () => {
   it.each([
@@ -157,15 +158,18 @@ describe('captionPrefix', () => {
   })
 })
 
-describe('summarizeToolCall', () => {
-  it('shows the first string argument on one line', () => {
-    expect(summarizeToolCall('bash', JSON.stringify({ command: 'ls -la\n/tmp' }), 60)).toBe('bash: ls -la /tmp')
-  })
-  it('falls back to the tool name on bad json', () => {
-    expect(summarizeToolCall('read', '{oops', 60)).toBe('read')
-  })
-  it('truncates to maxChars', () => {
-    const got = summarizeToolCall('bash', JSON.stringify({ command: 'x'.repeat(200) }), 20)
-    expect(got.length).toBeLessThanOrEqual(20)
+describe('toolStatus', () => {
+  const labels: StatusLabels = {
+    thinking: 'T', web: 'W', read: 'R', write: 'E', command: 'C', send: 'S', other: 'O',
+  }
+  it.each([
+    ['web_search', 'W'], ['web_fetch', 'W'],
+    ['read', 'R'], ['read_image', 'R'], ['glob', 'R'], ['grep', 'R'], ['telegram_chat_history', 'R'],
+    ['write', 'E'], ['edit', 'E'], ['str_replace_editor', 'E'],
+    ['bash', 'C'], ['pwsh', 'C'],
+    ['telegram_send_file', 'S'],
+    ['todo_write', 'O'], ['subagent', 'O'],
+  ])('maps %s to its group label', (name, expected) => {
+    expect(toolStatus(name, labels)).toBe(expected)
   })
 })

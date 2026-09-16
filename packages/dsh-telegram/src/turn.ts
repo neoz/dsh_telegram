@@ -2,10 +2,10 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createUserMessage, type ContentBlock, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { StatusLabels } from './config.ts'
 import {
   CAPTION_MAX_BYTES,
   TELEGRAM_MAX_MESSAGE_BYTES,
-  THINKING_TEXT,
   UNDELIVERED_NOTICE,
   UTF8_BOM,
   byteLength,
@@ -13,11 +13,9 @@ import {
   markdownToTelegramHTML,
   renderMessage,
   stripCollapse,
-  summarizeToolCall,
+  toolStatus,
 } from './render.ts'
 import type { TelegramApi } from './telegram-api.ts'
-
-export const STATUS_MAX_CHARS = 60
 
 /** Structural slice of dsh's Agent used by the runner (the real Agent satisfies it). */
 export interface TurnAgent {
@@ -46,6 +44,7 @@ export interface TurnOptions {
   messageSize: number
   statusEditIntervalMs: number
   turnTimeoutMs: number
+  status: StatusLabels
   log: { warn(msg: string): void; error(msg: string): void }
   now?: () => number
 }
@@ -91,7 +90,7 @@ export function summarizeTurn(session: TurnAgent['session'], firstSeq: number): 
 
 /** Throttled placeholder editor that never repeats the visible text. */
 class Placeholder {
-  private shown = THINKING_TEXT
+  private shown: string
   private pending: string | undefined
   private timer: NodeJS.Timeout | undefined
   private lastEdit = 0
@@ -103,7 +102,10 @@ class Placeholder {
     readonly messageId: number,
     private readonly intervalMs: number,
     private readonly now: () => number,
-  ) {}
+    initialText: string,
+  ) {
+    this.shown = initialText
+  }
 
   status(text: string): void {
     if (text === this.shown || text === this.pending) return
@@ -196,13 +198,13 @@ export async function runTurn(options: TurnOptions): Promise<TurnResult> {
   const { api, agent, chatId, log } = options
   const now = options.now ?? Date.now
   await api.sendChatAction(chatId, 'typing')
-  const placeholderId = (await api.sendMessage(chatId, THINKING_TEXT, { replyTo: { messageId: options.replyToMessageId } })).messageId
-  const placeholder = new Placeholder(api, chatId, placeholderId, options.statusEditIntervalMs, now)
+  const placeholderId = (await api.sendMessage(chatId, options.status.thinking, { replyTo: { messageId: options.replyToMessageId } })).messageId
+  const placeholder = new Placeholder(api, chatId, placeholderId, options.statusEditIntervalMs, now, options.status.thinking)
 
   const firstSeq = agent.session.seq
   const unsubscribe = options.feed((sessionId, event) => {
     if (sessionId !== agent.id || event.type !== 'tool/call') return
-    placeholder.status(summarizeToolCall(event.data.name, event.data.arguments, STATUS_MAX_CHARS))
+    placeholder.status(toolStatus(event.data.name, options.status))
   })
 
   let timedOut = false

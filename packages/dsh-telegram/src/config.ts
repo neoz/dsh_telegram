@@ -8,6 +8,17 @@ export interface RetryConfig {
   readonly maxUploadMb: number
 }
 
+/** Placeholder texts shown while a turn runs; tools map onto a group, never their arguments. */
+export interface StatusLabels {
+  readonly thinking: string
+  readonly web: string
+  readonly read: string
+  readonly write: string
+  readonly command: string
+  readonly send: string
+  readonly other: string
+}
+
 /** Plugin configuration; see the design spec for field semantics. */
 export interface Config {
   readonly botToken: string
@@ -24,6 +35,17 @@ export interface Config {
   /** How long getUpdates keeps retrying after failures before the bot gives up. */
   readonly pollRetryMs: number
   readonly retry: RetryConfig
+  readonly status: StatusLabels
+}
+
+const DEFAULT_STATUS: StatusLabels = {
+  thinking: 'Thinking...',
+  web: 'Searching the web...',
+  read: 'Reading files...',
+  write: 'Editing files...',
+  command: 'Running a command...',
+  send: 'Sending a file...',
+  other: 'Working...',
 }
 
 export const Config: z<Config> = z.object({
@@ -45,6 +67,15 @@ export const Config: z<Config> = z.object({
     maxDelayMs: z.number().min(0).default(8000),
     maxUploadMb: z.number().min(1).default(20),
   }).default({ maxAttempts: 4, startDelayMs: 500, maxDelayMs: 8000, maxUploadMb: 20 }),
+  status: z.object({
+    thinking: z.string().default(DEFAULT_STATUS.thinking),
+    web: z.string().default(DEFAULT_STATUS.web),
+    read: z.string().default(DEFAULT_STATUS.read),
+    write: z.string().default(DEFAULT_STATUS.write),
+    command: z.string().default(DEFAULT_STATUS.command),
+    send: z.string().default(DEFAULT_STATUS.send),
+    other: z.string().default(DEFAULT_STATUS.other),
+  }).default(DEFAULT_STATUS),
 })
 
 /** Checks Schemastery cannot express; throws on the first violation. */

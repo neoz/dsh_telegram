@@ -1,9 +1,10 @@
+import type { StatusLabels } from './config.ts'
+
 /** Telegram rendering rules ported from einoclaw's Go channel; all lengths are UTF-8 bytes. */
 
 export const TELEGRAM_MAX_MESSAGE_BYTES = 4096
 export const CAPTION_MAX_BYTES = 1024
 export const SPLIT_THRESHOLD_RATIO = 1.2
-export const THINKING_TEXT = 'Thinking...'
 export const UTF8_BOM = '\uFEFF'
 export const CAPTION_SUFFIX = '\n\n<i>Please read the attached .md file.</i>'
 export const UNDELIVERED_NOTICE = 'The reply was too long for one message, and sending it as a file failed too.'
@@ -161,18 +162,23 @@ export function captionPrefix(html: string, maxBytes: number): string {
   return repairHTMLTags(html.slice(0, cut).replace(/[ \n]+$/, '')) + CAPTION_SUFFIX
 }
 
-/** `name: <first string argument>` on one line, bounded to `maxChars`. */
-export function summarizeToolCall(name: string, argumentsJson: string, maxChars: number): string {
-  let detail = ''
-  try {
-    const parsed: unknown = JSON.parse(argumentsJson)
-    if (parsed !== null && typeof parsed === 'object') {
-      const first = Object.values(parsed as Record<string, unknown>).find(value => typeof value === 'string' && value !== '')
-      if (typeof first === 'string') detail = first.replace(/\s+/g, ' ').trim()
-    }
-  } catch {
-    // Malformed model arguments: the tool name alone is still a useful status.
-  }
-  const label = detail === '' ? name : `${name}: ${detail}`
-  return label.length > maxChars ? `${label.slice(0, maxChars - 1)}…` : label
+const TOOL_GROUPS: Record<string, keyof Omit<StatusLabels, 'thinking' | 'other'>> = {
+  web_search: 'web',
+  web_fetch: 'web',
+  read: 'read',
+  read_image: 'read',
+  glob: 'read',
+  grep: 'read',
+  telegram_chat_history: 'read',
+  write: 'write',
+  edit: 'write',
+  str_replace_editor: 'write',
+  bash: 'command',
+  pwsh: 'command',
+  telegram_send_file: 'send',
+}
+
+/** Status label for a tool call; arguments are never shown to the chat. */
+export function toolStatus(name: string, labels: StatusLabels): string {
+  return labels[TOOL_GROUPS[name] ?? 'other']
 }

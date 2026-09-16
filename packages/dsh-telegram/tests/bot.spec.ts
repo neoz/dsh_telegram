@@ -6,7 +6,6 @@ import { commandOf, createDispatcher, gate, handleMessage, isAllowed, type BotDe
 import { ChatLog } from '../src/chatlog.ts'
 import { Config } from '../src/config.ts'
 import type { TelegramMessage } from '../src/inbound.ts'
-import { THINKING_TEXT } from '../src/render.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
 
 const ann = { id: 7, is_bot: false, username: 'ann', first_name: 'Ann' }
@@ -108,7 +107,7 @@ describe('handleMessage', () => {
     expect(agents.markTurn).toHaveBeenCalledWith(5, 10)
     expect(followups).toHaveLength(1)
     expect((followups[0] as { content: unknown[] }).content).toEqual([{ type: 'text', text: 'hello' }])
-    expect(api.callsTo('sendMessage')[0]!.args[1]).toBe(THINKING_TEXT)
+    expect(api.callsTo('sendMessage')[0]!.args[1]).toBe('Thinking...')
     const log = await deps.chatLog.readAll(5)
     expect(log[0]).toMatchObject({ user_id: 7, text: 'hello' })
   })

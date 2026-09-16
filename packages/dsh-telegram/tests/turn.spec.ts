@@ -2,7 +2,8 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { THINKING_TEXT, UNDELIVERED_NOTICE, UTF8_BOM } from '../src/render.ts'
+import { Config } from '../src/config.ts'
+import { UNDELIVERED_NOTICE, UTF8_BOM } from '../src/render.ts'
 import { TelegramApiError } from '../src/telegram-api.ts'
 import { runTurn, type SessionEventFeed, type TurnAgent, type TurnOptions } from '../src/turn.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
@@ -43,11 +44,13 @@ let api: FakeTelegramApi
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'turn-')); api = new FakeTelegramApi() })
 afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 
+const status = Config({ botToken: 't', allowFrom: ['1'], workspaceRoot: '/w', dataDir: '/d', model: 'm' }).status
+
 function options(agentParts: ReturnType<typeof fakeAgent>, extra: Partial<TurnOptions> = {}): TurnOptions {
   return {
     api, agent: agentParts.agent, feed: agentParts.feed, chatId: 5, replyToMessageId: 10,
     content: [{ type: 'text', text: 'hi' }], outboxDir: join(dir, 'outbox'),
-    messageSize: 1024, statusEditIntervalMs: 0, turnTimeoutMs: 10_000,
+    messageSize: 1024, statusEditIntervalMs: 0, turnTimeoutMs: 10_000, status,
     log: { warn: () => {}, error: () => {} }, ...extra,
   }
 }
@@ -59,7 +62,7 @@ describe('runTurn', () => {
     expect(result.outcome).toBe('edited')
     expect(api.callsTo('sendChatAction')).toHaveLength(1)
     const [chatId, text, opts] = api.callsTo('sendMessage')[0]!.args as [number, string, { replyTo?: { messageId: number } }]
-    expect([chatId, text, opts.replyTo]).toEqual([5, THINKING_TEXT, { messageId: 10 }])
+    expect([chatId, text, opts.replyTo]).toEqual([5, 'Thinking...', { messageId: 10 }])
     const edit = api.callsTo('editMessageText').at(-1)!.args
     expect(edit).toEqual([5, 100, '<b>done</b>', { parseMode: 'HTML' }])
     expect(result.sentMessageId).toBe(100)
@@ -67,10 +70,10 @@ describe('runTurn', () => {
     expect(result.timing.deliverMs).toBeGreaterThanOrEqual(0)
   })
 
-  it('edits the placeholder with tool status and skips identical statuses', async () => {
+  it('edits the placeholder with group labels, never tool arguments, and skips repeats', async () => {
     const a = fakeAgent(async emit => {
       emit(turnStart)
-      emit(toolCall('bash', { command: 'ls' }))
+      emit(toolCall('bash', { command: 'rm -rf /tmp/x' }))
       await tick()
       emit(toolCall('bash', { command: 'ls' }))
       await tick()
@@ -81,7 +84,7 @@ describe('runTurn', () => {
     })
     await runTurn(options(a))
     const statuses = api.callsTo('editMessageText').map(c => c.args[2])
-    expect(statuses).toEqual(['bash: ls', 'read: /w/a.txt', 'ok'])
+    expect(statuses).toEqual(['Running a command...', 'Reading files...', 'ok'])
   })
 
   it('sends fresh when the placeholder edit fails', async () => {
