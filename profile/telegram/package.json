@@ -3,7 +3,7 @@
   "private": true,
   "dsh": {
     "profile": {
-      "bundles": ["@deepseek-ai/dsh-base", "dsh-telegram"],
+      "bundles": ["@deepseek-ai/dsh-base", "dsh-telegram", "dsh-web-search-searxng"],
       "patchReload": "startup"
     }
   }

@@ -13,3 +13,9 @@
       Thư mục làm việc của bạn là {{cwd}}. Câu trả lời được hiển thị trên Telegram,
       nên hãy viết markdown ngắn gọn. Muốn gửi file cho người dùng thì phải dùng tool
       telegram_send_file.
+
+# The dsh-web-search-searxng bundle replaces the web row's config wholesale; restate both providers.
+- id: web
+  config:
+    searchProvider: searxng
+    fetchProvider: http

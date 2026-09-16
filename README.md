@@ -23,6 +23,10 @@ Chats get their own working directory under `./workspace/<chat_id>/` (`inbox/` f
 - The agent can send files from the chat workspace with `telegram_send_file` and read earlier chat messages with `telegram_chat_history`.
 - The container runs dsh with `DSH_PERMISSION_MODE=danger-full-access`; the container is the sandbox.
 
+## Web search
+
+`web_search` runs against a self-hosted [SearXNG](https://docs.searxng.org/) instance (the `searxng` compose service, built from `docker/searxng/`) through the community `dsh-web-search-searxng` bundle, so searches need no API key and cost no model turn. `SEARXNG_SECRET` in `.env` is any random string. Engines, language and safe-search filters can be set on the `web-search-searxng` row in `profile/telegram/cordis.patch.yml`; to switch back to DeepSeek native search, set `searchProvider: deepseek-official` on the `web` row there.
+
 ## Configuration
 
 Plugin options are set in `packages/dsh-telegram/cordis.patch.yml` and can be overridden per deployment in `profile/telegram/cordis.patch.yml`. See `packages/dsh-telegram/src/config.ts` for every field and default. `DSH_LOG_LEVEL` (default `2`) controls console log verbosity; `DSH_MODEL` selects the model.

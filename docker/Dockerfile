@@ -21,6 +21,9 @@ COPY profile/telegram/ /opt/dsh-telegram/profile/
 COPY --from=builder /build/package.json /build/cordis.patch.yml /opt/dsh-telegram/profile/node_modules/dsh-telegram/
 COPY --from=builder /build/lib /opt/dsh-telegram/profile/node_modules/dsh-telegram/lib
 COPY --from=builder /build/node_modules /opt/dsh-telegram/profile/node_modules/dsh-telegram/node_modules
+# Extra profile bundles: pinned registry tarballs whose only dependencies are already in the dsh closure.
+ARG SEARXNG_PLUGIN_VERSION=0.4.0
+RUN mkdir -p /tmp/bundles /opt/dsh-telegram/profile/node_modules/dsh-web-search-searxng  && cd /tmp/bundles  && npm pack dsh-web-search-searxng@${SEARXNG_PLUGIN_VERSION} --silent  && tar -xzf dsh-web-search-searxng-*.tgz -C /opt/dsh-telegram/profile/node_modules/dsh-web-search-searxng --strip-components=1  && rm -rf /tmp/bundles
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
  && mkdir -p /dsh-home /workspace /data \

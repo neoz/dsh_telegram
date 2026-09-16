@@ -1,0 +1,13 @@
+# Minimal SearXNG configuration for the dsh-telegram web_search provider.
+# server.secret_key comes from the SEARXNG_SECRET environment variable.
+use_default_settings: true
+
+server:
+  # Only reachable from the compose network; the bot-filter/limiter needs Redis and is not wanted here.
+  limiter: false
+
+search:
+  # The JSON API is off by default; the provider needs it.
+  formats:
+    - html
+    - json

@@ -6,10 +6,21 @@ services:
     env_file: .env
     environment:
       DSH_PERMISSION_MODE: danger-full-access
+      SEARXNG_URL: http://searxng:8080
     volumes:
       - ./workspace:/workspace
       - ./data:/data
       - dsh-home:/dsh-home
+    depends_on:
+      - searxng
+    restart: unless-stopped
+
+  # Self-hosted metasearch behind web_search; not published outside the compose network.
+  searxng:
+    build: docker/searxng
+    env_file: .env
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
     restart: unless-stopped
 
 volumes:
