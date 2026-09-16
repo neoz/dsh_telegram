@@ -1,0 +1,28 @@
+# dsh-telegram bundle layer: console logging, persona for a chat assistant, and the bot row.
+- id: system-prompt
+  config:
+    personaPrefix: >-
+      You are a helpful assistant reachable through Telegram, powered by the {{model}} model.
+    personaSuffix: >-
+      Your working directory is {{cwd}}. Replies are rendered by Telegram; prefer concise markdown.
+      Files you want the user to receive must be sent with the telegram_send_file tool.
+
+- id: session-title-llm
+  disabled: true
+
+- insert:
+    - id: telegram-logger
+      name: dsh-telegram/logger
+      config:
+        levels:
+          default: !!js Number(process.env.DSH_LOG_LEVEL ?? 2)
+        showTime: 'yyyy-MM-dd hh:mm:ss '
+
+    - id: telegram
+      name: dsh-telegram
+      config:
+        botToken: !!js process.env.TELEGRAM_BOT_TOKEN
+        allowFrom: !!js (process.env.TELEGRAM_ALLOW_FROM ?? '').split(',').map(s => s.trim()).filter(Boolean)
+        workspaceRoot: !!js process.env.DSH_TELEGRAM_WORKSPACE ?? '/workspace'
+        dataDir: !!js process.env.DSH_TELEGRAM_DATA ?? '/data'
+        model: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'

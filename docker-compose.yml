@@ -1,0 +1,16 @@
+services:
+  dsh-telegram:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file: .env
+    environment:
+      DSH_PERMISSION_MODE: danger-full-access
+    volumes:
+      - ./workspace:/workspace
+      - ./data:/data
+      - dsh-home:/dsh-home
+    restart: unless-stopped
+
+volumes:
+  dsh-home:

@@ -1,0 +1,10 @@
+{
+  "name": "dsh-profile-telegram",
+  "private": true,
+  "dsh": {
+    "profile": {
+      "bundles": ["@deepseek-ai/dsh-base", "dsh-telegram"],
+      "patchReload": "startup"
+    }
+  }
+}
