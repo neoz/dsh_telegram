@@ -1,0 +1,150 @@
+import { join } from 'node:path'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
+import type { Config } from './config.ts'
+import { hasBotMention, logEntryFor, parseInbound, type TelegramMessage, type TelegramUser } from './inbound.ts'
+import type { ChatAgents } from './sessions.ts'
+import type { TelegramApi } from './telegram-api.ts'
+import { runTurn, type SessionEventFeed } from './turn.ts'
+
+/** Reaction placed on every message the agent will answer. */
+export const ACK_REACTION = '\u{1F47E}'
+
+export type GateVerdict = 'ignore' | 'log-only' | 'handle'
+
+export interface ImageStore {
+  saveImages(images: ReadonlyArray<{ data: Uint8Array; mediaType: 'image/jpeg' }>): Promise<ReadonlyArray<{ attachmentId: unknown }>>
+}
+
+export interface BotDeps {
+  api: TelegramApi
+  config: Config
+  chatLog: ChatLog
+  agents: ChatAgents
+  feed: SessionEventFeed
+  attachments: ImageStore
+  botId: number
+  botUsername: string
+  log: { info(msg: string): void; warn(msg: string): void; error(msg: string): void }
+}
+
+export function isAllowed(user: TelegramUser, allowFrom: readonly string[]): boolean {
+  const username = user.username?.toLowerCase()
+  return allowFrom.some((entry) => {
+    const normalized = entry.trim().replace(/^@/, '').toLowerCase()
+    return normalized === String(user.id) || (username !== undefined && normalized === username)
+  })
+}
+
+export function gate(message: TelegramMessage, options: { allowFrom: readonly string[]; botId: number; botUsername: string }): GateVerdict {
+  const sender = message.from
+  if (sender === undefined || sender.is_bot) return 'ignore'
+  const allowed = isAllowed(sender, options.allowFrom)
+  if (message.chat.type === 'private') return allowed ? 'handle' : 'ignore'
+  const targeted = hasBotMention(message.text, message.entities, options.botUsername)
+    || hasBotMention(message.caption, message.caption_entities, options.botUsername)
+    || message.reply_to_message?.from?.id === options.botId
+  return allowed && targeted ? 'handle' : 'log-only'
+}
+
+export function commandOf(text: string | undefined, botUsername: string): 'reset' | 'stop' | undefined {
+  const match = /^\/(reset|stop)(?:@(\w+))?\s*$/.exec(text ?? '')
+  if (match === null) return undefined
+  if (match[2] !== undefined && match[2].toLowerCase() !== botUsername.toLowerCase()) return undefined
+  return match[1] as 'reset' | 'stop'
+}
+
+function recentBlock(entries: ChatLogEntry[]): string {
+  return `Recent group messages:\n${entries.map(e => `- ${senderLabel(e)}: ${e.text}`).join('\n')}`
+}
+
+export async function handleMessage(message: TelegramMessage, deps: BotDeps): Promise<void> {
+  const verdict = gate(message, { allowFrom: deps.config.allowFrom, botId: deps.botId, botUsername: deps.botUsername })
+  if (verdict === 'ignore') return
+  const chatId = message.chat.id
+  if (verdict === 'log-only') {
+    await deps.chatLog.append(chatId, logEntryFor(message))
+    return
+  }
+
+  const command = commandOf(message.text, deps.botUsername)
+  if (command === 'reset') {
+    await deps.agents.reset(chatId)
+    await deps.api.sendMessage(chatId, 'Started a new conversation.')
+    return
+  }
+  if (command === 'stop') {
+    const stopped = deps.agents.stop(chatId)
+    await deps.api.sendMessage(chatId, stopped ? 'Stopped.' : 'Nothing is running.')
+    return
+  }
+
+  const workspaceDir = deps.agents.workspaceFor(chatId)
+  const inbound = await parseInbound(message, {
+    api: deps.api, inboxDir: join(workspaceDir, 'inbox'), botId: deps.botId, botUsername: deps.botUsername,
+  })
+  await deps.chatLog.append(chatId, inbound.logEntry)
+  await deps.api.setReaction(chatId, message.message_id, ACK_REACTION)
+
+  const resolved = await deps.agents.resolve(chatId)
+  if (resolved.resumeFailed !== undefined) {
+    await deps.api.sendMessage(chatId, 'The previous conversation could not be restored; starting a new one.')
+  }
+
+  let text = inbound.text
+  if (inbound.isGroup) {
+    const recent = await deps.chatLog.recent(chatId, deps.agents.lastTurnMessageId(chatId), message.message_id, deps.config.recentMessagesLimit)
+    if (recent.length > 0) text = `${recentBlock(recent)}\n\n${text}`
+  }
+  await deps.agents.markTurn(chatId, message.message_id)
+
+  const content: ContentBlock[] = [{ type: 'text', text }]
+  if (inbound.images.length > 0) {
+    const refs = await deps.attachments.saveImages(inbound.images)
+    for (const ref of refs) content.push({ type: 'image', attachment: ref as never })
+  }
+
+  const result = await runTurn({
+    api: deps.api,
+    agent: resolved.agent,
+    feed: deps.feed,
+    chatId,
+    replyToMessageId: message.message_id,
+    content,
+    outboxDir: join(workspaceDir, 'outbox'),
+    messageSize: deps.config.messageSize,
+    statusEditIntervalMs: deps.config.statusEditIntervalMs,
+    turnTimeoutMs: deps.config.turnTimeoutMs,
+    log: deps.log,
+  })
+
+  if (result.text !== '') {
+    await deps.chatLog.append(chatId, {
+      ts: new Date().toISOString(),
+      message_id: result.sentMessageId ?? 0,
+      user_id: deps.botId,
+      name: deps.botUsername,
+      text: result.text,
+      bot: true,
+    })
+  }
+  deps.log.info(`dsh-telegram: chat ${chatId} message ${message.message_id} -> ${result.outcome}`)
+}
+
+/** Serialises message handling per chat; a failing handler is logged and never blocks the next one. */
+export function createDispatcher(deps: BotDeps): (message: TelegramMessage) => void {
+  const chains = new Map<number, Promise<void>>()
+  return (message) => {
+    const chatId = message.chat.id
+    const previous = chains.get(chatId) ?? Promise.resolve()
+    const next = previous
+      .then(() => handleMessage(message, deps))
+      .catch((error: unknown) => {
+        deps.log.error(`dsh-telegram: message ${message.message_id} in chat ${chatId} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+      })
+      .finally(() => {
+        if (chains.get(chatId) === next) chains.delete(chatId)
+      })
+    chains.set(chatId, next)
+  }
+}
