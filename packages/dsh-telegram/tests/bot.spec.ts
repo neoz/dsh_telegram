@@ -39,6 +39,7 @@ describe('isAllowed / gate / commandOf', () => {
   it('recognises commands with and without the bot suffix', () => {
     expect(commandOf('/reset', 'dshbot')).toBe('reset')
     expect(commandOf('/stop@dshbot', 'dshbot')).toBe('stop')
+    expect(commandOf('/help', 'dshbot')).toBe('help')
     expect(commandOf('/stop@other', 'dshbot')).toBeUndefined()
     expect(commandOf('reset please', 'dshbot')).toBeUndefined()
   })
@@ -71,7 +72,7 @@ describe('handleMessage', () => {
       setTurn: vi.fn(), memoryInjected: vi.fn(() => false), markMemoryInjected: vi.fn(),
     }
     deps = {
-      api, config: Config({ botToken: 't', allowFrom: ['ann'], workspaceRoot: join(dir, 'ws'), dataDir: dir, model: 'm' }),
+      api, config: Config({ botToken: 't', allowFrom: ['ann'], workspaceRoot: join(dir, 'ws'), dataDir: dir, model: 'm', superAdmins: [7] }),
       chatLog: new ChatLog(join(dir, 'log')),
       memory: new MemoryStore(join(dir, 'memory'), { maxEntries: 50, maxGlobalEntries: 50, maxEntryChars: 200 }),
       agents: agents as never, feed: () => () => {},
@@ -104,6 +105,20 @@ describe('handleMessage', () => {
     agents.stop.mockReturnValueOnce(false)
     await handleMessage(msg({ text: '/stop' }), deps)
     expect(api.callsTo('sendMessage')[1]!.args[1]).toBe('Nothing is running.')
+  })
+
+  it('/help lists the commands without running a turn', async () => {
+    await handleMessage(msg({ text: '/help' }), deps)
+    expect(api.callsTo('sendMessage')[0]!.args[1]).toBe('/reset - start a new conversation\n/stop - cancel the running reply\n/help - show this list')
+    expect(agents.resolve).not.toHaveBeenCalled()
+  })
+
+  it('treats a command from a non-super-admin as an ordinary message', async () => {
+    const plain = { ...deps, config: Config({ botToken: 't', allowFrom: ['ann'], workspaceRoot: join(dir, 'ws'), dataDir: dir, model: 'm' }) }
+    await handleMessage(msg({ text: '/reset' }), plain)
+    expect(agents.reset).not.toHaveBeenCalled()
+    expect(agents.resolve).toHaveBeenCalled()
+    expect((await deps.chatLog.readAll(5))[0]).toMatchObject({ user_id: 7, text: '/reset' })
   })
 
   it('runs a turn: reacts, marks the turn, submits text, logs the reply', async () => {
@@ -210,6 +225,19 @@ describe('handleMessage', () => {
     dispatch(msg({ text: '/stop' }, 'private', 12))
     await new Promise(r => setTimeout(r, 5))
     expect(agents.stop).toHaveBeenCalledWith(5)
+    releaseFirst()
+  })
+
+  it('dispatcher queues /stop from a non-super-admin behind the running turn', async () => {
+    let releaseFirst!: () => void
+    agents.resolve.mockImplementationOnce(async () => { await new Promise<void>((r) => { releaseFirst = r }); throw new Error('boom') })
+    const plain = { ...deps, config: Config({ botToken: 't', allowFrom: ['ann'], workspaceRoot: join(dir, 'ws'), dataDir: dir, model: 'm' }) }
+    const dispatch = createDispatcher(plain)
+    dispatch(msg({ text: 'long task' }, 'private', 11))
+    dispatch(msg({ text: '/stop' }, 'private', 12))
+    await new Promise(r => setTimeout(r, 5))
+    expect(agents.stop).not.toHaveBeenCalled()
+    expect(agents.resolve).toHaveBeenCalledTimes(1)
     releaseFirst()
   })
 })

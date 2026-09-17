@@ -15,6 +15,9 @@ Chats get their own working directory under `./workspace/<chat_id>/` (`inbox/` f
 
 - `/reset` starts a new conversation for the chat.
 - `/stop` cancels the running reply.
+- `/help` lists the commands.
+
+Only the user ids in `TELEGRAM_SUPER_ADMINS` can use commands; from anyone else the bot treats `/reset` and friends as ordinary messages.
 
 ## Memory
 
