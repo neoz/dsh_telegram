@@ -14,14 +14,19 @@ export interface ChatLogEntry {
   bot?: true
 }
 
+/** Folds line breaks so text rendered as one line of a block cannot forge another line (e.g. a fake sender). */
+export function oneLine(text: string): string {
+  return text.replace(/\r?\n/g, ' ')
+}
+
 export function senderLabel(entry: Pick<ChatLogEntry, 'user_id' | 'username' | 'name' | 'bot'>): string {
   if (entry.bot) return 'assistant'
-  const base = entry.username === undefined ? `id:${entry.user_id}` : `@${entry.username}`
-  return entry.name === '' ? base : `${base} (${entry.name})`
+  const base = entry.username === undefined ? `id:${entry.user_id}` : `@${oneLine(entry.username)}`
+  return entry.name === '' ? base : `${base} (${oneLine(entry.name)})`
 }
 
 export function formatEntry(entry: ChatLogEntry): string {
-  return `[${entry.ts}] ${senderLabel(entry)}: ${entry.text}`
+  return `[${entry.ts}] ${senderLabel(entry)}: ${oneLine(entry.text)}`
 }
 
 /** Append-only per-chat JSONL log under `dir`. */

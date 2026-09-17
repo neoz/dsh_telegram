@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { oneLine } from './chatlog.ts'
 
 /** `chat` is the memory of one conversation (a private chat or a group); `global` is shared by every chat. */
 export type MemoryScope = { kind: 'chat'; chatId: number } | { kind: 'global' }
@@ -16,7 +17,7 @@ export interface MemoryLimits {
 interface MemoryFile { nextId: number; entries: MemoryEntry[] }
 
 export function formatMemoryEntry(entry: MemoryEntry): string {
-  return `[#${entry.id}] ${entry.text}`
+  return `[#${entry.id}] ${oneLine(entry.text)}`
 }
 
 /** One small JSON file per scope under `dir`, rewritten atomically on every change; nothing is cached. */
@@ -94,5 +95,5 @@ export function renderMemoryBlock(chat: MemoryEntry[], global: MemoryEntry[]): s
   const sections: string[] = []
   if (chat.length > 0) sections.push(`[Memory of this conversation]\n${chat.map(e => `- ${formatMemoryEntry(e)}`).join('\n')}`)
   if (global.length > 0) sections.push(`[Global memory]\n${global.map(e => `- ${formatMemoryEntry(e)}`).join('\n')}`)
-  return sections.join('\n\n')
+  return sections.length === 0 ? '' : `<memory>\n${sections.join('\n\n')}\n</memory>`
 }

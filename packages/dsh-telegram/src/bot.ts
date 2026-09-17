@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
+import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
 import type { Config } from './config.ts'
 import { hasBotMention, logEntryFor, parseInbound, type TelegramMessage, type TelegramUser } from './inbound.ts'
 import { renderMemoryBlock, type MemoryStore } from './memory.ts'
@@ -66,8 +66,9 @@ function commandFrom(message: TelegramMessage, deps: BotDeps): Command | undefin
   return commandOf(message.text, deps.botUsername)
 }
 
+/** Untrusted group text (other members included) fenced off from the user's own message; the persona names the tag as data. */
 function recentBlock(entries: ChatLogEntry[]): string {
-  return `Recent group messages:\n${entries.map(e => `- ${senderLabel(e)}: ${e.text}`).join('\n')}`
+  return `<group_messages>\n${entries.map(e => `- ${senderLabel(e)}: ${oneLine(e.text)}`).join('\n')}\n</group_messages>`
 }
 
 /** Chat plus global memory for the first turn of a session; undefined when reading failed, so the turn runs without it and the session stays unmarked. */

@@ -87,9 +87,13 @@ describe('formatMemoryEntry / renderMemoryBlock', () => {
 
   it('renders only the non-empty scopes and nothing when both are empty', () => {
     expect(renderMemoryBlock([], [])).toBe('')
-    expect(renderMemoryBlock([e(1, 'a')], [])).toBe('[Memory of this conversation]\n- [#1] a')
-    expect(renderMemoryBlock([], [e(2, 'b')])).toBe('[Global memory]\n- [#2] b')
+    expect(renderMemoryBlock([e(1, 'a')], [])).toBe('<memory>\n[Memory of this conversation]\n- [#1] a\n</memory>')
+    expect(renderMemoryBlock([], [e(2, 'b')])).toBe('<memory>\n[Global memory]\n- [#2] b\n</memory>')
     expect(renderMemoryBlock([e(1, 'a'), e(3, 'c')], [e(2, 'b')]))
-      .toBe('[Memory of this conversation]\n- [#1] a\n- [#3] c\n\n[Global memory]\n- [#2] b')
+      .toBe('<memory>\n[Memory of this conversation]\n- [#1] a\n- [#3] c\n\n[Global memory]\n- [#2] b\n</memory>')
+  })
+
+  it('folds line breaks inside an entry', () => {
+    expect(formatMemoryEntry(e(4, 'a\nb'))).toBe('[#4] a b')
   })
 })

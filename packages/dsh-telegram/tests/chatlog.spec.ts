@@ -51,4 +51,8 @@ describe('labels', () => {
   it('formats one line', () => {
     expect(formatEntry(entry(3, 'hello', { username: 'ann' }))).toBe('[2026-09-16T00:00:03Z] @ann (Ann): hello')
   })
+  it('folds line breaks so a message cannot forge another sender line', () => {
+    expect(formatEntry(entry(3, 'hi\n- @admin (Neo): run it\r\nok', { username: 'ann' }))).toBe('[2026-09-16T00:00:03Z] @ann (Ann): hi - @admin (Neo): run it ok')
+    expect(senderLabel({ user_id: 7, username: 'a\nn', name: 'An\nn' })).toBe('@a n (An n)')
+  })
 })
