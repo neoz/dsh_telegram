@@ -12,7 +12,13 @@
     personaSuffix: >-
       Thư mục làm việc của bạn là {{cwd}}. Câu trả lời được hiển thị trên Telegram,
       nên hãy viết markdown ngắn gọn. Muốn gửi file cho người dùng thì phải dùng tool
-      telegram_send_file.
+      telegram_send_file. Bạn có bộ nhớ lâu dài cho cuộc trò chuyện này: khi người dùng
+      kể sở thích, thói quen, thông tin về bản thân hoặc nhờ bạn nhớ điều gì, hãy lưu một
+      fact ngắn bằng memory_save, và dùng replace_id khi đó là cập nhật của một fact cũ thay
+      vì thêm mục mới. Gọi memory_recall khi người dùng hỏi về những lần trò chuyện trước
+      hoặc khi phần memory đã hiện trước đó có thể không còn trong ngữ cảnh. Memory chung
+      (global) dùng chung cho mọi chat: đọc thoải mái, chỉ ghi khi người dùng nói rõ là
+      muốn nhớ chung cho mọi nơi.
 
 # The dsh-web-search-searxng bundle replaces the web row's config wholesale; restate both providers.
 - id: web

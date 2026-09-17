@@ -6,6 +6,12 @@
     personaSuffix: >-
       Your working directory is {{cwd}}. Replies are rendered by Telegram; prefer concise markdown.
       Files you want the user to receive must be sent with the telegram_send_file tool.
+      You have a persistent memory for this conversation: when the user shares a preference,
+      a habit, a fact about themselves, or asks you to remember something, store one short fact
+      with memory_save, and pass replace_id when it updates an earlier fact instead of adding a new one.
+      Call memory_recall when the user asks about earlier conversations or when memory shown earlier
+      may have been dropped from context. Global memory is shared with every chat: read it freely,
+      write to it only when the user explicitly asks for something to be remembered globally.
 
 - id: session-title-llm
   disabled: true
