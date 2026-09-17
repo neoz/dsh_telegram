@@ -31,6 +31,7 @@ Caps default to 50 entries per chat, 50 global entries, and 200 characters per e
 - Replies longer than the configured `messageSize` fold the remainder behind "Show more"; replies that do not fit one Telegram message are sent as a `.md` file.
 - The agent can send files from the chat workspace with `telegram_send_file` and read earlier chat messages with `telegram_chat_history`.
 - The container runs dsh with `DSH_PERMISSION_MODE=danger-full-access`; the container is the sandbox.
+- The agent never holds the DeepSeek key: `DEEPSEEK_BASE_URL` points it at the `bifrost` service ([Bifrost](https://github.com/maximhq/bifrost), config in `docker/bifrost/config.json`), which is the only container that receives `DEEPSEEK_API_KEY` and injects it upstream. The agent's own `DEEPSEEK_API_KEY` is a placeholder that Bifrost ignores. Models the agent may request are listed on the key in that config; Bifrost has no Files API for DeepSeek, so image turns fall back to inline base64.
 
 ## Web search
 
