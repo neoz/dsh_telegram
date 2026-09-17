@@ -49,11 +49,21 @@ export function gate(message: TelegramMessage, options: { allowFrom: readonly st
   return allowed && targeted ? 'handle' : 'log-only'
 }
 
-export function commandOf(text: string | undefined, botUsername: string): 'reset' | 'stop' | undefined {
-  const match = /^\/(reset|stop)(?:@(\w+))?\s*$/.exec(text ?? '')
+export type Command = 'reset' | 'stop' | 'help'
+
+const HELP_TEXT = '/reset - start a new conversation\n/stop - cancel the running reply\n/help - show this list'
+
+export function commandOf(text: string | undefined, botUsername: string): Command | undefined {
+  const match = /^\/(reset|stop|help)(?:@(\w+))?\s*$/.exec(text ?? '')
   if (match === null) return undefined
   if (match[2] !== undefined && match[2].toLowerCase() !== botUsername.toLowerCase()) return undefined
-  return match[1] as 'reset' | 'stop'
+  return match[1] as Command
+}
+
+/** Commands are for super admins only; anyone else sending `/stop` gets an ordinary turn. */
+function commandFrom(message: TelegramMessage, deps: BotDeps): Command | undefined {
+  if (message.from === undefined || !deps.config.superAdmins.includes(message.from.id)) return undefined
+  return commandOf(message.text, deps.botUsername)
 }
 
 function recentBlock(entries: ChatLogEntry[]): string {
@@ -80,7 +90,7 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     return
   }
 
-  const command = commandOf(message.text, deps.botUsername)
+  const command = commandFrom(message, deps)
   if (command === 'reset') {
     await deps.agents.reset(chatId)
     await deps.api.sendMessage(chatId, 'Started a new conversation.')
@@ -89,6 +99,10 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   if (command === 'stop') {
     // A cancelled turn reports "Stopped." on its own placeholder; only an idle agent needs a reply here.
     if (!deps.agents.stop(chatId)) await deps.api.sendMessage(chatId, 'Nothing is running.')
+    return
+  }
+  if (command === 'help') {
+    await deps.api.sendMessage(chatId, HELP_TEXT)
     return
   }
 
@@ -170,7 +184,7 @@ export function createDispatcher(deps: BotDeps): (message: TelegramMessage) => v
   }
   return (message) => {
     const chatId = message.chat.id
-    if (commandOf(message.text, deps.botUsername) !== undefined) {
+    if (commandFrom(message, deps) !== undefined) {
       void handleMessage(message, deps).catch(report(message))
       return
     }
