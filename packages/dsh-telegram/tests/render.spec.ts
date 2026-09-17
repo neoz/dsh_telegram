@@ -35,6 +35,7 @@ describe('markdownToTelegramHTML', () => {
     ['~~strike~~', '<s>strike</s>'],
     ['use `fmt.Println`', 'use <code>fmt.Println</code>'],
     ['[Go](https://go.dev)', '<a href="https://go.dev">Go</a>'],
+    ['[x](https://a.dev/?q="y")', '<a href="https://a.dev/?q=&quot;y&quot;">x</a>'],
     ['```go\nfmt.Println("hello")\n```', '<pre><code>fmt.Println("hello")\n</code></pre>'],
     ['a < b & c > d', 'a &lt; b &amp; c &gt; d'],
     ["```\n<script>alert('xss')</script>\n```", "<pre><code>&lt;script&gt;alert('xss')&lt;/script&gt;\n</code></pre>"],

@@ -55,7 +55,7 @@ export function markdownToTelegramHTML(markdown: string): string {
   // cannot open a tag that closes outside the anchor.
   const links: string[] = []
   text = text.replace(reLink, (_match, label: string, href: string) => {
-    links.push(`<a href="${href}">${label}</a>`)
+    links.push(`<a href="${href.replaceAll('"', '&quot;')}">${label}</a>`)
     return `${MARK}LK${links.length - 1}${MARK}`
   })
   text = text.replace(reBold, '<b>$1</b>')
