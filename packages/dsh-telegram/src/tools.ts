@@ -70,7 +70,7 @@ export function createChatHistoryTool(deps: ToolDeps): ToolDefinition {
         ...(args.before_message_id === undefined ? {} : { beforeMessageId: args.before_message_id }),
         ...(args.query === undefined ? {} : { query: args.query }),
       })
-      return entries.length === 0 ? '(no messages)' : entries.map(formatEntry).join('\n')
+      return entries.length === 0 ? '(no messages)' : `<chat_history>\n${entries.map(formatEntry).join('\n')}\n</chat_history>`
     },
   })
 }

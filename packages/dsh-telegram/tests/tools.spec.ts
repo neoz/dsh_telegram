@@ -70,8 +70,8 @@ describe('telegram_chat_history', () => {
     }
     const tool = createChatHistoryTool(d)
     expect(tool.name).toBe('telegram_chat_history')
-    expect(await tool.execute({ limit: 2 }, exec)).toBe('[t4] @u (U): even4\n[t5] @u (U): odd5')
-    expect(await tool.execute({ limit: 10, before_message_id: 3, query: 'odd' }, exec)).toBe('[t1] @u (U): odd1')
+    expect(await tool.execute({ limit: 2 }, exec)).toBe('<chat_history>\n[t4] @u (U): even4\n[t5] @u (U): odd5\n</chat_history>')
+    expect(await tool.execute({ limit: 10, before_message_id: 3, query: 'odd' }, exec)).toBe('<chat_history>\n[t1] @u (U): odd1\n</chat_history>')
     expect(await tool.execute({ limit: 10, query: 'zzz' }, exec)).toBe('(no messages)')
   })
 })
