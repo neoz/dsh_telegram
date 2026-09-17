@@ -1,0 +1,14 @@
+{
+  "providers": {
+    "deepseek": {
+      "keys": [
+        {
+          "name": "deepseek",
+          "value": "env.DEEPSEEK_API_KEY",
+          "models": ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"],
+          "weight": 1.0
+        }
+      ]
+    }
+  }
+}

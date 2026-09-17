@@ -1,16 +1,26 @@
 services:
   dsh-telegram:
     image: ghcr.io/neoz/dsh-telegram:latest
-    env_file: .env
+    # Only what the agent needs is mapped from .env; the rest stays out of the agent process.
     environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOW_FROM: ${TELEGRAM_ALLOW_FROM}
+      TELEGRAM_SUPER_ADMINS: ${TELEGRAM_SUPER_ADMINS}
+      DSH_MODEL: ${DSH_MODEL:-deepseek-flash}
+      DSH_LOG_LEVEL: ${DSH_LOG_LEVEL:-2}
       DSH_PERMISSION_MODE: danger-full-access
       SEARXNG_URL: http://searxng:8080
+      # The agent talks to DeepSeek through bifrost, which holds the real key; dsh still
+      # insists on a credential, so it gets a placeholder that Bifrost ignores.
+      DEEPSEEK_BASE_URL: http://bifrost:8080/openai/v1
+      DEEPSEEK_API_KEY: bifrost
     volumes:
       - ./workspace:/workspace
       - ./data:/data
       - dsh-home:/dsh-home
     depends_on:
       - searxng
+      - bifrost
     restart: unless-stopped
 
   # Self-hosted metasearch behind web_search; not published outside the compose network.
@@ -23,5 +33,20 @@ services:
       - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
     restart: unless-stopped
 
+  # LLM gateway that injects the DeepSeek key; the only service that receives it.
+  bifrost:
+    image: maximhq/bifrost:latest
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8080
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+    ports:
+      - "8080:8080"
+    volumes:
+      - bifrost-data:/app/data
+      - ./docker/bifrost/config.json:/app/data/config.json
+    restart: unless-stopped
+
 volumes:
   dsh-home:
+  bifrost-data:
