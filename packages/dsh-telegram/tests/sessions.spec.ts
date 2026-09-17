@@ -129,4 +129,33 @@ describe('ChatAgents', () => {
     await agents.disposeAll()
     expect(disposed).toHaveLength(2)
   })
+
+  it('records the running turn per chat', async () => {
+    const { agents } = await build()
+    const ann = { id: 7, is_bot: false, username: 'ann', first_name: 'Ann' }
+    expect(agents.turnOf(1)).toBeUndefined()
+    agents.setTurn(1, { sender: ann, isGroup: false })
+    agents.setTurn(2, { sender: ann, isGroup: true })
+    expect(agents.turnOf(1)).toEqual({ sender: ann, isGroup: false })
+    expect(agents.turnOf(2)).toEqual({ sender: ann, isGroup: true })
+  })
+
+  it('tracks memory injection per chat and session', async () => {
+    const { agents } = await build()
+    expect(agents.memoryInjected(1, 's1')).toBe(false)
+    agents.markMemoryInjected(1, 's1')
+    expect(agents.memoryInjected(1, 's1')).toBe(true)
+    expect(agents.memoryInjected(1, 's2')).toBe(false)
+    expect(agents.memoryInjected(2, 's1')).toBe(false)
+  })
+
+  it('reset forgets the turn and injection records', async () => {
+    const { agents } = await build()
+    await agents.resolve(1)
+    agents.setTurn(1, { sender: { id: 7, is_bot: false, first_name: 'Ann' }, isGroup: false })
+    agents.markMemoryInjected(1, 's1')
+    await agents.reset(1)
+    expect(agents.turnOf(1)).toBeUndefined()
+    expect(agents.memoryInjected(1, 's1')).toBe(false)
+  })
 })

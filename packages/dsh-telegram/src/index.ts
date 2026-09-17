@@ -11,6 +11,7 @@ import { createDispatcher } from './bot.ts'
 import { ChatLog } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
 import type { TelegramMessage } from './inbound.ts'
+import { MemoryStore } from './memory.ts'
 import { SessionMap } from './session-map.ts'
 import { ChatAgents } from './sessions.ts'
 import { createGrammyApi } from './telegram-api.ts'
@@ -51,6 +52,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   const api = createGrammyApi(bot, config.botToken)
 
   const chatLog = new ChatLog(join(config.dataDir, 'chatlog'))
+  const memory = new MemoryStore(join(config.dataDir, 'memory'), config.memory)
   const map = new SessionMap(join(config.dataDir, 'telegram-sessions.json'))
   await map.load()
 
@@ -66,7 +68,10 @@ async function start(ctx: Context, config: Config): Promise<Started> {
       ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }),
     },
     setup: (agentCtx, _agent, chatId) => {
-      registerChatTools(agentCtx, { api, chatLog, chatId, workspaceDir: agents.workspaceFor(chatId), maxUploadBytes })
+      registerChatTools(agentCtx, {
+        api, chatLog, chatId, workspaceDir: agents.workspaceFor(chatId), maxUploadBytes,
+        memory, superAdmins: config.superAdmins, currentTurn: () => agents.turnOf(chatId),
+      })
     },
     log,
   })
@@ -75,6 +80,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     api,
     config,
     chatLog,
+    memory,
     agents,
     feed,
     attachments: ctx.attachments,
