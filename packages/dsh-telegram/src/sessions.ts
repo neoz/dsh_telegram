@@ -6,6 +6,7 @@ import { installModelSelection, type Agent, type AgentHandle, type CreateAgentOp
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { TelegramUser } from './inbound.ts'
 import type { SessionMap } from './session-map.ts'
 
 /** The slice of `ctx.agents` this module uses; the real registry satisfies it structurally. */
@@ -28,9 +29,15 @@ export interface ChatAgentsOptions {
 
 export interface ResolvedAgent { agent: Agent; resumed: boolean; resumeFailed?: string }
 
+/** Who started the turn running in a chat, and whether that chat is a group. */
+export interface TurnContext { sender: TelegramUser; isGroup: boolean }
+
 /** One live or persisted dsh agent per Telegram chat. */
 export class ChatAgents {
   private readonly handles = new Map<number, AgentHandle>()
+  private readonly turns = new Map<number, TurnContext>()
+  /** Session id that already received the memory block, per chat. */
+  private readonly injected = new Map<number, string>()
 
   constructor(private readonly options: ChatAgentsOptions) {}
 
@@ -46,6 +53,22 @@ export class ChatAgents {
     const record = this.options.map.get(chatId)
     if (record === undefined) return
     await this.options.map.set(chatId, { ...record, lastTurnMessageId })
+  }
+
+  setTurn(chatId: number, turn: TurnContext): void {
+    this.turns.set(chatId, turn)
+  }
+
+  turnOf(chatId: number): TurnContext | undefined {
+    return this.turns.get(chatId)
+  }
+
+  memoryInjected(chatId: number, sessionId: string): boolean {
+    return this.injected.get(chatId) === sessionId
+  }
+
+  markMemoryInjected(chatId: number, sessionId: string): void {
+    this.injected.set(chatId, sessionId)
   }
 
   async resolve(chatId: number): Promise<ResolvedAgent> {
@@ -109,6 +132,8 @@ export class ChatAgents {
   async reset(chatId: number): Promise<void> {
     const handle = this.handles.get(chatId)
     this.handles.delete(chatId)
+    this.turns.delete(chatId)
+    this.injected.delete(chatId)
     await this.options.map.delete(chatId)
     if (handle === undefined) return
     // Let a running turn wind down (and deliver its "Stopped.") before the agent goes away.

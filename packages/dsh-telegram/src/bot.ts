@@ -3,6 +3,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
 import type { Config } from './config.ts'
 import { hasBotMention, logEntryFor, parseInbound, type TelegramMessage, type TelegramUser } from './inbound.ts'
+import { renderMemoryBlock, type MemoryStore } from './memory.ts'
 import type { ChatAgents } from './sessions.ts'
 import type { TelegramApi } from './telegram-api.ts'
 import { runTurn, type SessionEventFeed } from './turn.ts'
@@ -20,6 +21,7 @@ export interface BotDeps {
   api: TelegramApi
   config: Config
   chatLog: ChatLog
+  memory: MemoryStore
   agents: ChatAgents
   feed: SessionEventFeed
   attachments: ImageStore
@@ -58,6 +60,17 @@ function recentBlock(entries: ChatLogEntry[]): string {
   return `Recent group messages:\n${entries.map(e => `- ${senderLabel(e)}: ${e.text}`).join('\n')}`
 }
 
+/** Chat plus global memory for the first turn of a session; undefined when reading failed, so the turn runs without it and the session stays unmarked. */
+async function memoryBlock(deps: BotDeps, chatId: number): Promise<string | undefined> {
+  try {
+    const [chat, global] = await Promise.all([deps.memory.list({ kind: 'chat', chatId }), deps.memory.list({ kind: 'global' })])
+    return renderMemoryBlock(chat, global)
+  } catch (error) {
+    deps.log.warn(`dsh-telegram: reading memory for chat ${chatId} failed: ${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
+}
+
 export async function handleMessage(message: TelegramMessage, deps: BotDeps): Promise<void> {
   const verdict = gate(message, { allowFrom: deps.config.allowFrom, botId: deps.botId, botUsername: deps.botUsername })
   if (verdict === 'ignore') return
@@ -94,11 +107,17 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     await deps.api.sendMessage(chatId, 'The previous conversation could not be restored; starting a new one.')
   }
 
+  deps.agents.setTurn(chatId, { sender: inbound.sender, isGroup: inbound.isGroup })
+
   let text = inbound.text
   if (inbound.isGroup) {
     const recent = await deps.chatLog.recent(chatId, deps.agents.lastTurnMessageId(chatId), message.message_id, deps.config.recentMessagesLimit)
     if (recent.length > 0) text = `${recentBlock(recent)}\n\n${text}`
   }
+  // The memory block goes in front of the first user message of a session; later turns rely on memory_recall.
+  const sessionId = resolved.agent.id
+  const memoryText = deps.agents.memoryInjected(chatId, sessionId) ? '' : await memoryBlock(deps, chatId)
+  if (memoryText !== undefined && memoryText !== '') text = `${memoryText}\n\n${text}`
   await deps.agents.markTurn(chatId, message.message_id)
 
   const content: ContentBlock[] = [{ type: 'text', text }]
@@ -108,6 +127,7 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   }
 
   const prepMs = Date.now() - receivedAt
+  if (memoryText !== undefined) deps.agents.markMemoryInjected(chatId, sessionId)
   const result = await runTurn({
     api: deps.api,
     agent: resolved.agent,
