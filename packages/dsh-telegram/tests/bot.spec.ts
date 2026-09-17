@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +6,7 @@ import { commandOf, createDispatcher, gate, handleMessage, isAllowed, type BotDe
 import { ChatLog } from '../src/chatlog.ts'
 import { Config } from '../src/config.ts'
 import type { TelegramMessage } from '../src/inbound.ts'
+import { MemoryStore } from '../src/memory.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
 
 const ann = { id: 7, is_bot: false, username: 'ann', first_name: 'Ann' }
@@ -50,6 +51,7 @@ describe('handleMessage', () => {
   let agents: {
     resolve: ReturnType<typeof vi.fn>; reset: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn>
     markTurn: ReturnType<typeof vi.fn>; lastTurnMessageId: ReturnType<typeof vi.fn>; workspaceFor: ReturnType<typeof vi.fn>
+    setTurn: ReturnType<typeof vi.fn>; memoryInjected: ReturnType<typeof vi.fn>; markMemoryInjected: ReturnType<typeof vi.fn>
   }
   let followups: unknown[]
 
@@ -66,10 +68,13 @@ describe('handleMessage', () => {
       resolve: vi.fn(async () => ({ agent, resumed: false })),
       reset: vi.fn(async () => {}), stop: vi.fn(() => true), markTurn: vi.fn(async () => {}),
       lastTurnMessageId: vi.fn(() => 0), workspaceFor: vi.fn(() => join(dir, 'ws', '5')),
+      setTurn: vi.fn(), memoryInjected: vi.fn(() => false), markMemoryInjected: vi.fn(),
     }
     deps = {
       api, config: Config({ botToken: 't', allowFrom: ['ann'], workspaceRoot: join(dir, 'ws'), dataDir: dir, model: 'm' }),
-      chatLog: new ChatLog(join(dir, 'log')), agents: agents as never, feed: () => () => {},
+      chatLog: new ChatLog(join(dir, 'log')),
+      memory: new MemoryStore(join(dir, 'memory'), { maxEntries: 50, maxGlobalEntries: 50, maxEntryChars: 200 }),
+      agents: agents as never, feed: () => () => {},
       attachments: { saveImages: vi.fn(async (images: unknown[]) => images.map((_, i) => ({ attachmentId: `att${i}` }))) },
       botId: 1, botUsername: 'dshbot', log: { info: () => {}, warn: () => {}, error: () => {} },
     }
@@ -119,6 +124,54 @@ describe('handleMessage', () => {
     const content = (followups[0] as { content: Array<{ type: string; text?: string }> }).content
     expect(content[0]!.text).toBe('Recent group messages:\n- id:9 (Bob): earlier note\n\n@ann (Ann): see')
     expect(content[1]).toEqual({ type: 'image', attachment: { attachmentId: 'att0' } })
+  })
+
+  it('records the turn context before the turn is submitted', async () => {
+    const submittedBefore: number[] = []
+    agents.setTurn.mockImplementation(() => { submittedBefore.push(followups.length) })
+    await handleMessage(msg({ text: 'hello' }), deps)
+    expect(agents.setTurn).toHaveBeenCalledWith(5, { sender: ann, isGroup: false })
+    await handleMessage(msg({ text: '@dshbot hi', entities: mention }, 'supergroup', 11), deps)
+    expect(agents.setTurn).toHaveBeenLastCalledWith(5, { sender: ann, isGroup: true })
+    expect(submittedBefore).toEqual([0, 1])
+  })
+
+  it('prepends chat and global memory once per session', async () => {
+    await deps.memory.save({ kind: 'chat', chatId: 5 }, 'likes tea')
+    await deps.memory.save({ kind: 'global' }, 'stand-up 9:00')
+    await handleMessage(msg({ text: 'hello' }), deps)
+    const first = (followups[0] as { content: Array<{ text?: string }> }).content[0]!.text
+    expect(first).toBe('[Memory of this conversation]\n- [#1] likes tea\n\n[Global memory]\n- [#1] stand-up 9:00\n\nhello')
+    expect(agents.markMemoryInjected).toHaveBeenCalledWith(5, 's1')
+
+    agents.memoryInjected.mockReturnValue(true)
+    await handleMessage(msg({ text: 'again' }, 'private', 11), deps)
+    expect((followups[1] as { content: Array<{ text?: string }> }).content[0]!.text).toBe('again')
+  })
+
+  it('puts the memory block before the recent group block', async () => {
+    await deps.memory.save({ kind: 'chat', chatId: 5 }, 'group rule')
+    await deps.chatLog.append(5, { ts: 't', message_id: 8, user_id: 9, name: 'Bob', text: 'earlier note' })
+    await handleMessage(msg({ text: '@dshbot see', entities: mention }, 'supergroup'), deps)
+    expect((followups[0] as { content: Array<{ text?: string }> }).content[0]!.text)
+      .toBe('[Memory of this conversation]\n- [#1] group rule\n\nRecent group messages:\n- id:9 (Bob): earlier note\n\n@ann (Ann): see')
+  })
+
+  it('marks the session even when both scopes are empty', async () => {
+    await handleMessage(msg({ text: 'hello' }), deps)
+    expect((followups[0] as { content: Array<{ text?: string }> }).content[0]!.text).toBe('hello')
+    expect(agents.markMemoryInjected).toHaveBeenCalledWith(5, 's1')
+  })
+
+  it('runs the turn without memory and does not mark the session when reading fails', async () => {
+    const warnings: string[] = []
+    deps.log = { info: () => {}, warn: (m) => { warnings.push(m) }, error: () => {} }
+    await mkdir(join(dir, 'memory'), { recursive: true })
+    await writeFile(join(dir, 'memory', '5.json'), '{not json', 'utf8')
+    await handleMessage(msg({ text: 'hello' }), deps)
+    expect((followups[0] as { content: Array<{ text?: string }> }).content[0]!.text).toBe('hello')
+    expect(agents.markMemoryInjected).not.toHaveBeenCalled()
+    expect(warnings[0]).toMatch(/reading memory for chat 5 failed/)
   })
 
   it('tells the chat when a resume failed', async () => {
