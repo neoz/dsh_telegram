@@ -9,7 +9,7 @@ A Telegram front end for [DeepSeek Harness](https://github.com/deepseek-ai/deeps
 3. `cp .env.example .env` and fill in `DEEPSEEK_API_KEY`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_ALLOW_FROM` (comma-separated Telegram user ids or usernames). `TELEGRAM_SUPER_ADMINS` (comma-separated user ids) lists who may edit the global memory.
 4. `docker compose up -d` (pulls the release image `ghcr.io/neoz/dsh-telegram:latest`), or `docker compose -f docker-compose.dev.yml up -d --build` to build locally. `.\build-and-push.ps1` builds the release image and pushes it to ghcr.io.
 
-Chats get their own working directory under `./workspace/<chat_id>/` (`inbox/` for files you send, `outbox/` for long replies saved as `.md`); files there untouched for `fileRetentionDays` (default 365) are deleted by a daily sweep. Conversation state lives in the `dsh-home` volume; the chat-to-session map and chat logs live in `./data/`.
+Chats get their own working directory under `./workspace/<chat_id>/` (`inbox/` for files you send, `outbox/` for long replies saved as `.md`; see [Files](#files) for retention). Conversation state lives in the `dsh-home` volume; the chat-to-session map and chat logs live in `./data/`.
 
 ## Commands
 
@@ -24,6 +24,23 @@ Only the user ids in `TELEGRAM_SUPER_ADMINS` can use commands; from anyone else 
 The agent keeps a small persistent memory per chat (a private chat remembers that user; a group remembers that group) and one global memory shared by every chat. Entries are short facts stored as JSON under `./data/memory/` (`<chat_id>.json`, `global.json`), so they survive `/reset` and container recreation and can be edited by hand. The agent uses `memory_save`, `memory_recall`, and `memory_forget`; the memory of the chat and the global memory are shown to the agent once at the start of each conversation.
 
 Caps default to 50 entries per chat, 50 global entries, and 200 characters per entry (`memory.maxEntries`, `memory.maxGlobalEntries`, `memory.maxEntryChars` on the `telegram` row). When a scope is full the agent must replace or forget an entry before saving another. Only the user ids in `TELEGRAM_SUPER_ADMINS` can add, replace, or forget global entries, and only from a private chat with the bot.
+
+## Files
+
+Documents, voice notes, audio and photos sent to the bot (or in a message someone replies to) are saved under `./workspace/<chat_id>/inbox/<file_unique_id>/`. The same file sent or replied to again reuses the saved copy instead of being downloaded again.
+
+At startup and then once a day, files in `inbox/` and `outbox/` not used for `fileRetentionDays` days (default `365`, minimum `1`) are deleted, together with the folders they leave empty. A reused file counts as used again. Nothing else in the workspace is touched.
+
+To change the period, add the field to the `telegram` row in `profile/telegram/cordis.patch.yml`. Patches replace a row's config wholesale, so keep the existing fields:
+
+```yaml
+- id: telegram
+  config:
+    # ...existing fields...
+    fileRetentionDays: 30
+```
+
+The profile is baked into the image, so rebuild it afterwards (`docker compose -f docker-compose.dev.yml up -d --build`, or `.\build-and-push.ps1` for the release image).
 
 ## Behaviour
 
