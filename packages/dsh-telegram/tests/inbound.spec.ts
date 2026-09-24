@@ -90,4 +90,24 @@ describe('parseInbound', () => {
     expect(got2.images).toHaveLength(0)
     expect(got2.text.startsWith('> assistant: first line')).toBe(true)
   })
+
+  it('saves a quoted user document, voice or audio into the inbox without logging it as own media', async () => {
+    api.files.set('qd', { data: Buffer.from('pdf'), filePath: 'documents/q.pdf' })
+    api.files.set('qv', { data: Buffer.from('ogg'), filePath: 'voice/q.oga' })
+    const bob = { id: 9, is_bot: false, first_name: 'Bob' }
+    const quoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: bob, document: { file_id: 'qd', file_name: 'report.pdf' }, voice: { file_id: 'qv' } }
+    const got = await parseInbound(msg({ text: 'what is this for?', reply_to_message: quoted }), options())
+    const doc = join(dir, 'inbox', 'report.pdf')
+    expect(await readFile(doc, 'utf8')).toBe('pdf')
+    expect(got.text).toMatch(new RegExp(`^> id:9 \\(Bob\\): \\[file: ${doc.replace(/[\\.]/g, '\\$&')}\\]\n> \\[voice: .+\\.ogg\\]\n\nwhat is this for\\?$`))
+    expect(got.savedFiles).toEqual([])
+    expect(got.logEntry.media).toBeUndefined()
+  })
+
+  it('does not download a document quoted from the bot', async () => {
+    const botQuoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: { id: 1, is_bot: true, first_name: 'dsh' }, caption: 'answer', document: { file_id: 'bd', file_name: 'response.md' } }
+    const got = await parseInbound(msg({ text: 'more', reply_to_message: botQuoted }), options())
+    expect(api.callsTo('downloadFile')).toHaveLength(0)
+    expect(got.text).toBe('> assistant: answer\n\nmore')
+  })
 })

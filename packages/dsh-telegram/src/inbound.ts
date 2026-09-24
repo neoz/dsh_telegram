@@ -74,6 +74,21 @@ async function saveInbox(api: TelegramApi, inboxDir: string, fileId: string, pre
   return target
 }
 
+/** Saves the message's document, voice and audio into the inbox; returns the paths and their text markers. */
+async function saveMedia(message: TelegramMessage, api: TelegramApi, inboxDir: string): Promise<{ paths: string[]; markers: string[] }> {
+  const paths: string[] = []
+  const markers: string[] = []
+  const save = async (kind: string, fileId: string, name: string | undefined, fallbackExt: string) => {
+    const path = await saveInbox(api, inboxDir, fileId, name, fallbackExt)
+    paths.push(path)
+    markers.push(`[${kind}: ${path}]`)
+  }
+  if (message.document !== undefined) await save('file', message.document.file_id, message.document.file_name, '')
+  if (message.voice !== undefined) await save('voice', message.voice.file_id, undefined, '.ogg')
+  if (message.audio !== undefined) await save('audio', message.audio.file_id, message.audio.file_name, '.mp3')
+  return { paths, markers }
+}
+
 /** Chat-log record for any observed message; `savedFiles` lists inbox paths when media was downloaded. */
 export function logEntryFor(message: TelegramMessage, savedFiles: string[] = []): ChatLogEntry {
   const sender = message.from
@@ -108,21 +123,9 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
     const { data } = await options.api.downloadFile(photoId)
     images.push({ data, mediaType: 'image/jpeg' })
   }
-  if (message.document !== undefined) {
-    const path = await saveInbox(options.api, options.inboxDir, message.document.file_id, message.document.file_name, '')
-    savedFiles.push(path)
-    parts.push(`[file: ${path}]`)
-  }
-  if (message.voice !== undefined) {
-    const path = await saveInbox(options.api, options.inboxDir, message.voice.file_id, undefined, '.ogg')
-    savedFiles.push(path)
-    parts.push(`[voice: ${path}]`)
-  }
-  if (message.audio !== undefined) {
-    const path = await saveInbox(options.api, options.inboxDir, message.audio.file_id, message.audio.file_name, '.mp3')
-    savedFiles.push(path)
-    parts.push(`[audio: ${path}]`)
-  }
+  const media = await saveMedia(message, options.api, options.inboxDir)
+  savedFiles.push(...media.paths)
+  parts.push(...media.markers)
   if (message.sticker !== undefined) {
     parts.push(message.sticker.emoji === undefined ? '[sticker]' : `[sticker: ${message.sticker.emoji}]`)
   }
@@ -140,6 +143,10 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
       const { data } = await options.api.downloadFile(quotedPhoto)
       images.push({ data, mediaType: 'image/jpeg' })
       quotedText = quotedText === '' ? '[image]' : `${quotedText}\n[image]`
+    }
+    if (!fromBot) {
+      const quotedMedia = await saveMedia(quoted, options.api, options.inboxDir)
+      quotedText = [quotedText, ...quotedMedia.markers].filter(t => t !== '').join('\n')
     }
     const label = fromBot ? 'assistant' : displayName(quoted.from)
     const block = quotedText.split('\n').map((line, i) => (i === 0 ? `> ${label}: ${line}` : `> ${line}`)).join('\n')
