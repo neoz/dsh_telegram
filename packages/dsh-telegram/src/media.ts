@@ -1,5 +1,5 @@
-import { access, realpath } from 'node:fs/promises'
-import { basename, extname, join, resolve, sep } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { basename, extname, resolve, sep } from 'node:path'
 
 const PHOTO_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
 
@@ -22,22 +22,4 @@ export async function resolveInsideWorkspace(workspaceDir: string, requested: st
 
 export function outboundKind(path: string): 'photo' | 'document' {
   return PHOTO_EXTENSIONS.has(extname(path).toLowerCase()) ? 'photo' : 'document'
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** `dir/filename`, or `dir/name-N.ext` for the first free N. */
-export async function uniquePath(dir: string, filename: string): Promise<string> {
-  const ext = extname(filename)
-  const stem = filename.slice(0, filename.length - ext.length)
-  let candidate = join(dir, filename)
-  for (let n = 1; await exists(candidate); n++) candidate = join(dir, `${stem}-${n}${ext}`)
-  return candidate
 }

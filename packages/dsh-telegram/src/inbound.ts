@@ -1,11 +1,13 @@
-import { mkdir, writeFile } from 'node:fs/promises'
-import { extname } from 'node:path'
+import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
+import { extname, join } from 'node:path'
 import type { ChatLogEntry } from './chatlog.ts'
-import { sanitizeFilename, uniquePath } from './media.ts'
+import { sanitizeFilename } from './media.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
 export interface TelegramUser { id: number; is_bot: boolean; username?: string; first_name: string }
 interface Entity { type: string; offset: number; length: number }
+/** `file_unique_id` stays the same for one file across messages and bots, unlike `file_id`. */
+interface FileRef { file_id: string; file_unique_id: string }
 
 /** The subset of a Telegram message the parser reads; grammY's Message satisfies it structurally. */
 export interface TelegramMessage {
@@ -17,10 +19,10 @@ export interface TelegramMessage {
   caption?: string
   entities?: Entity[]
   caption_entities?: Entity[]
-  photo?: Array<{ file_id: string; width: number; height: number }>
-  document?: { file_id: string; file_name?: string; mime_type?: string }
-  voice?: { file_id: string }
-  audio?: { file_id: string; file_name?: string }
+  photo?: Array<FileRef & { width: number; height: number }>
+  document?: FileRef & { file_name?: string; mime_type?: string }
+  voice?: FileRef
+  audio?: FileRef & { file_name?: string }
   sticker?: { emoji?: string }
   reply_to_message?: TelegramMessage
 }
@@ -60,32 +62,46 @@ function bodyText(message: TelegramMessage): string {
   return [message.text, message.caption].filter((t): t is string => t !== undefined && t !== '').join('\n')
 }
 
-function largestPhoto(photo: TelegramMessage['photo']): string | undefined {
+function largestPhoto(photo: TelegramMessage['photo']): FileRef | undefined {
   if (photo === undefined || photo.length === 0) return undefined
-  return photo.reduce((best, p) => (p.width * p.height > best.width * best.height ? p : best)).file_id
+  return photo.reduce((best, p) => (p.width * p.height > best.width * best.height ? p : best))
 }
 
-async function saveInbox(api: TelegramApi, inboxDir: string, fileId: string, preferredName: string | undefined, fallbackExt: string): Promise<string> {
-  const { data, filePath } = await api.downloadFile(fileId)
+/** Saves the file to `inbox/<file_unique_id>/<name>`; a file already there is reused and its mtime refreshed for retention. */
+async function saveInbox(api: TelegramApi, inboxDir: string, file: FileRef, preferredName: string | undefined, fallbackExt: string): Promise<string> {
+  const dir = join(inboxDir, sanitizeFilename(file.file_unique_id, ''))
+  const [existing] = await readdir(dir).catch(() => [])
+  if (existing !== undefined) {
+    const path = join(dir, existing)
+    const now = new Date()
+    await utimes(path, now, now)
+    return path
+  }
+  const { data, filePath } = await api.downloadFile(file.file_id)
   const ext = fallbackExt === '' ? extname(filePath) : fallbackExt
-  await mkdir(inboxDir, { recursive: true })
-  const target = await uniquePath(inboxDir, sanitizeFilename(preferredName, ext))
+  await mkdir(dir, { recursive: true })
+  const target = join(dir, sanitizeFilename(preferredName, ext))
   await writeFile(target, data)
   return target
+}
+
+async function loadPhoto(api: TelegramApi, inboxDir: string, photo: FileRef): Promise<InboundImage> {
+  const path = await saveInbox(api, inboxDir, photo, 'photo.jpg', '.jpg')
+  return { data: await readFile(path), mediaType: 'image/jpeg' }
 }
 
 /** Saves the message's document, voice and audio into the inbox; returns the paths and their text markers. */
 async function saveMedia(message: TelegramMessage, api: TelegramApi, inboxDir: string): Promise<{ paths: string[]; markers: string[] }> {
   const paths: string[] = []
   const markers: string[] = []
-  const save = async (kind: string, fileId: string, name: string | undefined, fallbackExt: string) => {
-    const path = await saveInbox(api, inboxDir, fileId, name, fallbackExt)
+  const save = async (kind: string, file: FileRef, name: string | undefined, fallbackExt: string) => {
+    const path = await saveInbox(api, inboxDir, file, name, fallbackExt)
     paths.push(path)
     markers.push(`[${kind}: ${path}]`)
   }
-  if (message.document !== undefined) await save('file', message.document.file_id, message.document.file_name, '')
-  if (message.voice !== undefined) await save('voice', message.voice.file_id, undefined, '.ogg')
-  if (message.audio !== undefined) await save('audio', message.audio.file_id, message.audio.file_name, '.mp3')
+  if (message.document !== undefined) await save('file', message.document, message.document.file_name, '')
+  if (message.voice !== undefined) await save('voice', message.voice, undefined, '.ogg')
+  if (message.audio !== undefined) await save('audio', message.audio, message.audio.file_name, '.mp3')
   return { paths, markers }
 }
 
@@ -118,11 +134,8 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
   if (isGroup) body = stripBotMention(body, options.botUsername)
   if (body !== '') parts.push(body)
 
-  const photoId = largestPhoto(message.photo)
-  if (photoId !== undefined) {
-    const { data } = await options.api.downloadFile(photoId)
-    images.push({ data, mediaType: 'image/jpeg' })
-  }
+  const photo = largestPhoto(message.photo)
+  if (photo !== undefined) images.push(await loadPhoto(options.api, options.inboxDir, photo))
   const media = await saveMedia(message, options.api, options.inboxDir)
   savedFiles.push(...media.paths)
   parts.push(...media.markers)
@@ -140,8 +153,7 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
     let quotedText = quoted.text ?? quoted.caption ?? ''
     const quotedPhoto = fromBot ? undefined : largestPhoto(quoted.photo)
     if (quotedPhoto !== undefined) {
-      const { data } = await options.api.downloadFile(quotedPhoto)
-      images.push({ data, mediaType: 'image/jpeg' })
+      images.push(await loadPhoto(options.api, options.inboxDir, quotedPhoto))
       quotedText = quotedText === '' ? '[image]' : `${quotedText}\n[image]`
     }
     if (!fromBot) {

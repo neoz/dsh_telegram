@@ -12,6 +12,7 @@ import { ChatLog } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
 import type { TelegramMessage } from './inbound.ts'
 import { MemoryStore } from './memory.ts'
+import { sweepOldFiles } from './retention.ts'
 import { SessionMap } from './session-map.ts'
 import { ChatAgents } from './sessions.ts'
 import { createGrammyApi } from './telegram-api.ts'
@@ -126,9 +127,26 @@ function startPolling(bot: Bot, config: Config, log: ReturnType<typeof loggerFor
   }
 }
 
+const DAY_MS = 86_400_000
+
+/** Sweeps old inbox and outbox files now and then once a day; returns the timer to clear on stop. */
+function startRetention(config: Config, log: ReturnType<typeof loggerFor>): NodeJS.Timeout {
+  const sweep = () => {
+    sweepOldFiles(config.workspaceRoot, config.fileRetentionDays * DAY_MS).catch((error: unknown) => {
+      log.warn(`dsh-telegram: file retention sweep failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+  sweep()
+  return setInterval(sweep, DAY_MS).unref()
+}
+
 export function apply(ctx: Context, config: Config): void {
   assertConfig(config)
   const log = loggerFor(ctx)
+  ctx.effect(() => {
+    const timer = startRetention(config, log)
+    return () => clearInterval(timer)
+  }, 'dsh-telegram: file retention')
   let started: Started | undefined
   let stopped = false
   ctx.effect(() => {

@@ -18,6 +18,7 @@ describe('Config', () => {
     expect(config.statusEditIntervalMs).toBe(1000)
     expect(config.turnTimeoutMs).toBe(900_000)
     expect(config.pollRetryMs).toBe(86_400_000)
+    expect(config.fileRetentionDays).toBe(365)
     expect(config.retry).toEqual({ maxAttempts: 4, startDelayMs: 500, maxDelayMs: 8000, maxUploadMb: 20 })
     expect(config.status).toEqual({
       thinking: 'Thinking...',

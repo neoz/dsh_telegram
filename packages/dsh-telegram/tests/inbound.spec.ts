@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -35,7 +35,7 @@ describe('mentions and names', () => {
     expect(displayName({ id: 9, is_bot: false, first_name: 'Bob' })).toBe('id:9 (Bob)')
   })
   it('logEntryFor records a photo-only message', () => {
-    expect(logEntryFor(msg({ photo: [{ file_id: 'p', width: 1, height: 1 }] })).text).toBe('[photo]')
+    expect(logEntryFor(msg({ photo: [{ file_id: 'p', file_unique_id: 'up', width: 1, height: 1 }] })).text).toBe('[photo]')
   })
 })
 
@@ -54,17 +54,32 @@ describe('parseInbound', () => {
 
   it('downloads the largest photo as an image block', async () => {
     api.files.set('big', { data: Buffer.from('jpegbytes'), filePath: 'photos/1.jpg' })
-    const got = await parseInbound(msg({ caption: 'look', photo: [{ file_id: 'small', width: 1, height: 1 }, { file_id: 'big', width: 9, height: 9 }] }), options())
+    const got = await parseInbound(msg({ caption: 'look', photo: [{ file_id: 'small', file_unique_id: 'usmall', width: 1, height: 1 }, { file_id: 'big', file_unique_id: 'ubig', width: 9, height: 9 }] }), options())
     expect(got.images).toEqual([{ data: Buffer.from('jpegbytes'), mediaType: 'image/jpeg' }])
     expect(got.text).toBe('look')
     expect(api.callsTo('downloadFile')[0]?.args).toEqual(['big'])
   })
 
+  it('downloads a file with the same unique id only once and refreshes its mtime', async () => {
+    api.files.set('doc', { data: Buffer.from('pdf'), filePath: 'documents/x.pdf' })
+    api.files.set('big', { data: Buffer.from('jpegbytes'), filePath: 'photos/1.jpg' })
+    const media = { document: { file_id: 'doc', file_unique_id: 'udoc', file_name: 'report.pdf' }, photo: [{ file_id: 'big', file_unique_id: 'ubig', width: 9, height: 9 }] }
+    const first = await parseInbound(msg(media), options())
+    const doc = join(dir, 'inbox', 'udoc', 'report.pdf')
+    const old = new Date(Date.now() - 86_400_000)
+    await utimes(doc, old, old)
+    const second = await parseInbound(msg({ ...media, document: { ...media.document, file_id: 'other-id' }, photo: [{ ...media.photo[0]!, file_id: 'other-photo' }] }), options())
+    expect(api.callsTo('downloadFile').map(c => c.args[0])).toEqual(['big', 'doc'])
+    expect(second.savedFiles).toEqual(first.savedFiles)
+    expect(second.images).toEqual([{ data: Buffer.from('jpegbytes'), mediaType: 'image/jpeg' }])
+    expect((await stat(doc)).mtimeMs).toBeGreaterThan(old.getTime())
+  })
+
   it('saves documents, voice and audio into the inbox and annotates the text', async () => {
     api.files.set('doc', { data: Buffer.from('pdf'), filePath: 'documents/x.pdf' })
     api.files.set('v', { data: Buffer.from('ogg'), filePath: 'voice/1.oga' })
-    const got = await parseInbound(msg({ text: 'see', document: { file_id: 'doc', file_name: 'report.pdf' }, voice: { file_id: 'v' } }), options())
-    const doc = join(dir, 'inbox', 'report.pdf')
+    const got = await parseInbound(msg({ text: 'see', document: { file_id: 'doc', file_unique_id: 'udoc', file_name: 'report.pdf' }, voice: { file_id: 'v', file_unique_id: 'uv' } }), options())
+    const doc = join(dir, 'inbox', 'udoc', 'report.pdf')
     expect(await readFile(doc, 'utf8')).toBe('pdf')
     expect(got.savedFiles).toHaveLength(2)
     expect(got.text).toBe(`see\n[file: ${doc}]\n[voice: ${got.savedFiles[1]}]`)
@@ -79,7 +94,7 @@ describe('parseInbound', () => {
 
   it('prepends quoted reply context and downloads a quoted user photo but not a bot one', async () => {
     api.files.set('q', { data: Buffer.from('img'), filePath: 'photos/q.jpg' })
-    const quoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: { id: 9, is_bot: false, first_name: 'Bob' }, text: 'first line\nsecond', photo: [{ file_id: 'q', width: 1, height: 1 }] }
+    const quoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: { id: 9, is_bot: false, first_name: 'Bob' }, text: 'first line\nsecond', photo: [{ file_id: 'q', file_unique_id: 'uq', width: 1, height: 1 }] }
     const got = await parseInbound(msg({ text: 'reply', reply_to_message: quoted }), options())
     expect(got.text).toBe('> id:9 (Bob): first line\n> second\n> [image]\n\nreply')
     expect(got.images).toHaveLength(1)
@@ -95,9 +110,9 @@ describe('parseInbound', () => {
     api.files.set('qd', { data: Buffer.from('pdf'), filePath: 'documents/q.pdf' })
     api.files.set('qv', { data: Buffer.from('ogg'), filePath: 'voice/q.oga' })
     const bob = { id: 9, is_bot: false, first_name: 'Bob' }
-    const quoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: bob, document: { file_id: 'qd', file_name: 'report.pdf' }, voice: { file_id: 'qv' } }
+    const quoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: bob, document: { file_id: 'qd', file_unique_id: 'uqd', file_name: 'report.pdf' }, voice: { file_id: 'qv', file_unique_id: 'uqv' } }
     const got = await parseInbound(msg({ text: 'what is this for?', reply_to_message: quoted }), options())
-    const doc = join(dir, 'inbox', 'report.pdf')
+    const doc = join(dir, 'inbox', 'uqd', 'report.pdf')
     expect(await readFile(doc, 'utf8')).toBe('pdf')
     expect(got.text).toMatch(new RegExp(`^> id:9 \\(Bob\\): \\[file: ${doc.replace(/[\\.]/g, '\\$&')}\\]\n> \\[voice: .+\\.ogg\\]\n\nwhat is this for\\?$`))
     expect(got.savedFiles).toEqual([])
@@ -105,7 +120,7 @@ describe('parseInbound', () => {
   })
 
   it('does not download a document quoted from the bot', async () => {
-    const botQuoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: { id: 1, is_bot: true, first_name: 'dsh' }, caption: 'answer', document: { file_id: 'bd', file_name: 'response.md' } }
+    const botQuoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'private' }, from: { id: 1, is_bot: true, first_name: 'dsh' }, caption: 'answer', document: { file_id: 'bd', file_unique_id: 'ubd', file_name: 'response.md' } }
     const got = await parseInbound(msg({ text: 'more', reply_to_message: botQuoted }), options())
     expect(api.callsTo('downloadFile')).toHaveLength(0)
     expect(got.text).toBe('> assistant: answer\n\nmore')
