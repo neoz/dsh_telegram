@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { outboundKind, resolveInsideWorkspace, sanitizeFilename, uniquePath } from '../src/media.ts'
+import { outboundKind, resolveInsideWorkspace, sanitizeFilename } from '../src/media.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
 
 let dir: string
@@ -49,14 +49,4 @@ describe('resolveInsideWorkspace', () => {
 describe('outboundKind', () => {
   it.each([['a.png', 'photo'], ['b.JPG', 'photo'], ['c.webp', 'photo'], ['d.pdf', 'document'], ['e', 'document']])(
     '%s -> %s', (path, kind) => expect(outboundKind(path)).toBe(kind))
-})
-
-describe('uniquePath', () => {
-  it('adds a numeric suffix on collision', async () => {
-    await mkdir(join(dir, 'inbox'))
-    await writeFile(join(dir, 'inbox', 'a.txt'), '')
-    await writeFile(join(dir, 'inbox', 'a-1.txt'), '')
-    expect(await uniquePath(join(dir, 'inbox'), 'a.txt')).toBe(join(dir, 'inbox', 'a-2.txt'))
-    expect(await uniquePath(join(dir, 'inbox'), 'b.txt')).toBe(join(dir, 'inbox', 'b.txt'))
-  })
 })

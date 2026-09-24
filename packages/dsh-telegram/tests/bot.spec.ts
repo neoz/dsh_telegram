@@ -135,7 +135,7 @@ describe('handleMessage', () => {
   it('injects recent group messages and image blocks', async () => {
     await deps.chatLog.append(5, { ts: 't', message_id: 8, user_id: 9, name: 'Bob', text: 'earlier note' })
     api.files.set('big', { data: Buffer.from('jpg'), filePath: 'p.jpg' })
-    await handleMessage(msg({ caption: '@dshbot see', caption_entities: mention, photo: [{ file_id: 'big', width: 2, height: 2 }] }, 'supergroup'), deps)
+    await handleMessage(msg({ caption: '@dshbot see', caption_entities: mention, photo: [{ file_id: 'big', file_unique_id: 'ubig', width: 2, height: 2 }] }, 'supergroup'), deps)
     const content = (followups[0] as { content: Array<{ type: string; text?: string }> }).content
     expect(content[0]!.text).toBe('<group_messages>\n- id:9 (Bob): earlier note\n</group_messages>\n\n@ann (Ann): see')
     expect(content[1]).toEqual({ type: 'image', attachment: { attachmentId: 'att0' } })

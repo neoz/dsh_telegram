@@ -9,7 +9,7 @@ A Telegram front end for [DeepSeek Harness](https://github.com/deepseek-ai/deeps
 3. `cp .env.example .env` and fill in `DEEPSEEK_API_KEY`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_ALLOW_FROM` (comma-separated Telegram user ids or usernames). `TELEGRAM_SUPER_ADMINS` (comma-separated user ids) lists who may edit the global memory.
 4. `docker compose up -d` (pulls the release image `ghcr.io/neoz/dsh-telegram:latest`), or `docker compose -f docker-compose.dev.yml up -d --build` to build locally. `.\build-and-push.ps1` builds the release image and pushes it to ghcr.io.
 
-Chats get their own working directory under `./workspace/<chat_id>/` (`inbox/` for files you send, `outbox/` for long replies saved as `.md`). Conversation state lives in the `dsh-home` volume; the chat-to-session map and chat logs live in `./data/`.
+Chats get their own working directory under `./workspace/<chat_id>/` (`inbox/` for files you send, `outbox/` for long replies saved as `.md`); files there untouched for `fileRetentionDays` (default 365) are deleted by a daily sweep. Conversation state lives in the `dsh-home` volume; the chat-to-session map and chat logs live in `./data/`.
 
 ## Commands
 

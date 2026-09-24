@@ -35,6 +35,8 @@ export interface Config {
   readonly turnTimeoutMs: number
   /** How long getUpdates keeps retrying after failures before the bot gives up. */
   readonly pollRetryMs: number
+  /** Inbox and outbox files untouched for this many days are deleted. */
+  readonly fileRetentionDays: number
   readonly retry: RetryConfig
   readonly status: StatusLabels
   /** Telegram user ids allowed to add, replace, or forget global memory entries. */
@@ -65,6 +67,7 @@ export const Config: z<Config> = z.object({
   statusEditIntervalMs: z.number().min(0).default(1000),
   turnTimeoutMs: z.number().min(1).default(900_000),
   pollRetryMs: z.number().min(1).default(86_400_000),
+  fileRetentionDays: z.number().min(1).default(365),
   retry: z.object({
     maxAttempts: z.number().min(1).default(4),
     startDelayMs: z.number().min(0).default(500),
