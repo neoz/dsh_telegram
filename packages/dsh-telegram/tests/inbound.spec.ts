@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { displayName, hasBotMention, logEntryFor, parseInbound, stripBotMention, type TelegramMessage } from '../src/inbound.ts'
+import { displayName, hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, stripBotMention, type TelegramMessage } from '../src/inbound.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
 
 let dir: string
@@ -36,6 +36,19 @@ describe('mentions and names', () => {
   })
   it('logEntryFor records a photo-only message', () => {
     expect(logEntryFor(msg({ photo: [{ file_id: 'p', file_unique_id: 'up', width: 1, height: 1 }] })).text).toBe('[photo]')
+  })
+})
+
+describe('saveObservedPhoto', () => {
+  it('saves the largest photo into the inbox', async () => {
+    api.files.set('big', { data: Buffer.from('jpegbytes'), filePath: 'photos/1.jpg' })
+    const paths = await saveObservedPhoto(msg({ photo: [{ file_id: 'small', file_unique_id: 'usmall', width: 1, height: 1 }, { file_id: 'big', file_unique_id: 'ubig', width: 9, height: 9 }] }), api, join(dir, 'inbox'))
+    expect(paths).toEqual([join(dir, 'inbox', 'ubig', 'photo.jpg')])
+    expect(await readFile(paths[0]!, 'utf8')).toBe('jpegbytes')
+  })
+  it('returns nothing for a message without a photo', async () => {
+    expect(await saveObservedPhoto(msg({ text: 'hi' }), api, join(dir, 'inbox'))).toEqual([])
+    expect(api.callsTo('downloadFile')).toHaveLength(0)
   })
 })
 

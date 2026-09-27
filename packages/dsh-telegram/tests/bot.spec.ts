@@ -95,6 +95,23 @@ describe('handleMessage', () => {
     expect(agents.resolve).not.toHaveBeenCalled()
   })
 
+  it('saves photos of untargeted group messages so they survive deletion', async () => {
+    api.files.set('p', { data: Buffer.from('jpegbytes'), filePath: 'photos/1.jpg' })
+    await handleMessage(msg({ from: bob, photo: [{ file_id: 'p', file_unique_id: 'up', width: 1, height: 1 }] }, 'supergroup'), deps)
+    expect((await deps.chatLog.readAll(5))[0]).toMatchObject({ text: '[photo]', media: [join(dir, 'ws', '5', 'inbox', 'up', 'photo.jpg')] })
+    expect(agents.resolve).not.toHaveBeenCalled()
+  })
+
+  it('still logs an untargeted photo when saving it fails', async () => {
+    const warnings: string[] = []
+    deps.log = { info: () => {}, warn: (m) => { warnings.push(m) }, error: () => {} }
+    await handleMessage(msg({ from: bob, photo: [{ file_id: 'missing', file_unique_id: 'um', width: 1, height: 1 }] }, 'supergroup'), deps)
+    const [logged] = await deps.chatLog.readAll(5)
+    expect(logged).toMatchObject({ text: '[photo]' })
+    expect(logged!.media).toBeUndefined()
+    expect(warnings[0]).toMatch(/saving photo of message 10 in chat 5 failed/)
+  })
+
   it('handles /reset and /stop without touching the agent turn', async () => {
     await handleMessage(msg({ text: '/reset' }), deps)
     expect(agents.reset).toHaveBeenCalledWith(5)

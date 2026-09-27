@@ -26,7 +26,8 @@ export function senderLabel(entry: Pick<ChatLogEntry, 'user_id' | 'username' | '
 }
 
 export function formatEntry(entry: ChatLogEntry): string {
-  return `[${entry.ts}] ${senderLabel(entry)}: ${oneLine(entry.text)}`
+  const media = entry.media === undefined ? '' : ` [media: ${entry.media.join(', ')}]`
+  return `[${entry.ts}] ${senderLabel(entry)}: ${oneLine(entry.text)}${media}`
 }
 
 /** Append-only per-chat JSONL log under `dir`. */

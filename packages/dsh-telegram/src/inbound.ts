@@ -90,6 +90,12 @@ async function loadPhoto(api: TelegramApi, inboxDir: string, photo: FileRef): Pr
   return { data: await readFile(path), mediaType: 'image/jpeg' }
 }
 
+/** Saves the largest photo of a message the bot only observes, so it can be sent again after the sender deletes it. */
+export async function saveObservedPhoto(message: TelegramMessage, api: TelegramApi, inboxDir: string): Promise<string[]> {
+  const photo = largestPhoto(message.photo)
+  return photo === undefined ? [] : [await saveInbox(api, inboxDir, photo, 'photo.jpg', '.jpg')]
+}
+
 /** Saves the message's document, voice and audio into the inbox; returns the paths and their text markers. */
 async function saveMedia(message: TelegramMessage, api: TelegramApi, inboxDir: string): Promise<{ paths: string[]; markers: string[] }> {
   const paths: string[] = []

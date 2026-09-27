@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
 import type { Config } from './config.ts'
-import { hasBotMention, logEntryFor, parseInbound, type TelegramMessage, type TelegramUser } from './inbound.ts'
+import { hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, type TelegramMessage, type TelegramUser } from './inbound.ts'
 import { renderMemoryBlock, type MemoryStore } from './memory.ts'
 import type { ChatAgents } from './sessions.ts'
 import type { TelegramApi } from './telegram-api.ts'
@@ -87,7 +87,11 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   if (verdict === 'ignore') return
   const chatId = message.chat.id
   if (verdict === 'log-only') {
-    await deps.chatLog.append(chatId, logEntryFor(message))
+    const saved = await saveObservedPhoto(message, deps.api, join(deps.agents.workspaceFor(chatId), 'inbox')).catch((error: unknown) => {
+      deps.log.warn(`dsh-telegram: saving photo of message ${message.message_id} in chat ${chatId} failed: ${error instanceof Error ? error.message : String(error)}`)
+      return []
+    })
+    await deps.chatLog.append(chatId, logEntryFor(message, saved))
     return
   }
 
