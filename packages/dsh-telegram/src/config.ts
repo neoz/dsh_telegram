@@ -67,7 +67,7 @@ export const Config: z<Config> = z.object({
   statusEditIntervalMs: z.number().min(0).default(1000),
   turnTimeoutMs: z.number().min(1).default(900_000),
   pollRetryMs: z.number().min(1).default(86_400_000),
-  fileRetentionDays: z.number().min(1).default(365),
+  fileRetentionDays: z.number().min(1).default(90),
   retry: z.object({
     maxAttempts: z.number().min(1).default(4),
     startDelayMs: z.number().min(0).default(500),

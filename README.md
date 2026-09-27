@@ -29,7 +29,7 @@ Caps default to 50 entries per chat, 50 global entries, and 200 characters per e
 
 Documents, voice notes, audio and photos sent to the bot (or in a message someone replies to) are saved under `./workspace/<chat_id>/inbox/<file_unique_id>/`. The same file sent or replied to again reuses the saved copy instead of being downloaded again.
 
-At startup and then once a day, files in `inbox/` and `outbox/` not used for `fileRetentionDays` days (default `365`, minimum `1`) are deleted, together with the folders they leave empty. A reused file counts as used again. Nothing else in the workspace is touched.
+At startup and then once a day, files in `inbox/` and `outbox/` not used for `fileRetentionDays` days (default `90`, minimum `1`) are deleted, together with the folders they leave empty. A reused file counts as used again. Nothing else in the workspace is touched.
 
 To change the period, add the field to the `telegram` row in `profile/telegram/cordis.patch.yml`. Patches replace a row's config wholesale, so keep the existing fields:
 
