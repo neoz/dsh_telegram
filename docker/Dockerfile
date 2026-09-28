@@ -10,7 +10,7 @@ RUN pnpm run build \
  && pnpm install --prod --no-frozen-lockfile --ignore-scripts --config.auto-install-peers=false
 
 FROM node:22-bookworm-slim
-ARG DSH_VERSION=0.1.5-rc.2
+ARG DSH_VERSION=0.1.7-rc.2
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/* \
@@ -24,7 +24,7 @@ COPY --from=builder /build/package.json /build/cordis.patch.yml /opt/dsh-telegra
 COPY --from=builder /build/lib /opt/dsh-telegram/profile/node_modules/dsh-telegram/lib
 COPY --from=builder /build/node_modules /opt/dsh-telegram/profile/node_modules/dsh-telegram/node_modules
 # Extra profile bundles: pinned registry tarballs whose only dependencies are already in the dsh closure.
-ARG SEARXNG_PLUGIN_VERSION=0.4.0
+ARG SEARXNG_PLUGIN_VERSION=0.5.1
 RUN mkdir -p /tmp/bundles /opt/dsh-telegram/profile/node_modules/dsh-web-search-searxng  && cd /tmp/bundles  && npm pack dsh-web-search-searxng@${SEARXNG_PLUGIN_VERSION} --silent  && tar -xzf dsh-web-search-searxng-*.tgz -C /opt/dsh-telegram/profile/node_modules/dsh-web-search-searxng --strip-components=1  && rm -rf /tmp/bundles
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
