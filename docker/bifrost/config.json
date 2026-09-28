@@ -1,6 +1,6 @@
 {
   "providers": {
-    "deepseek": {
+    "anthropic": {
       "keys": [
         {
           "name": "deepseek",
@@ -8,7 +8,10 @@
           "models": ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"],
           "weight": 1.0
         }
-      ]
+      ],
+      "network_config": {
+        "base_url": "https://api.deepseek.com/anthropic"
+      }
     }
   }
 }
