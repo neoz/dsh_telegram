@@ -10,7 +10,7 @@ RUN pnpm run build \
  && pnpm install --prod --no-frozen-lockfile --ignore-scripts --config.auto-install-peers=false
 
 FROM node:22-bookworm-slim
-ARG DSH_VERSION=0.1.7-rc.2
+ARG DSH_VERSION=0.2.0-rc.2
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/* \
