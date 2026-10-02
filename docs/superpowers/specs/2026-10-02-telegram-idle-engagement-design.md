@@ -80,10 +80,13 @@ tests substitute a fake.
    chat log again and re-run `shouldEngage` without the chance roll, since a
    user may have addressed the bot meanwhile.
 4. Set `lastAttemptAt = now`, then `decide` with the newest
-   `contextMessages` entries. Entries the bot already answered (the
-   `reply_to` of any bot entry) are marked so the model does not pick them:
-   a bot has one reaction per message, so reacting there would replace the
-   `ACK_REACTION`.
+   `contextMessages` entries. Entries the bot already answered (logged with
+   `handled: true` when they got a turn, or the `reply_to` of any bot entry)
+   and the last 50 messages idle reacted to (in memory) are marked so the
+   model does not pick them: a bot has one reaction per message, so reacting
+   there would replace the `ACK_REACTION` or the earlier idle reaction. The
+   model call is aborted when the scheduler stops, and a disabled config
+   starts no timer.
 5. Execute:
    - `react`: `api.setReaction(chatId, messageId, emoji)`.
    - `reply`: `api.sendMessage(chatId, text, { replyTo: messageId })` as plain
