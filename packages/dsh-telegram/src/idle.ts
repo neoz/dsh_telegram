@@ -195,6 +195,7 @@ function describeAction(action: IdleAction): string {
 /** Periodically lets the bot join active groups that have not addressed it for a while. */
 export function startIdle(deps: IdleDeps): IdleHandle {
   const { config, log } = deps
+  if (!config.enabled) return { noteTurn: () => {}, tick: async () => {}, stop: () => {} }
   const now = deps.now ?? Date.now
   const random = deps.random ?? Math.random
   const system = idleSystemPrompt(config.persona, deps.model)
@@ -275,6 +276,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
   }
 
   const timer = setInterval(() => { void tick() }, config.checkIntervalMinutes * MINUTE_MS).unref()
+  log.info(`dsh-telegram: idle engagement on for ${config.chatIds.length} chat(s)`)
   return {
     noteTurn: (chatId) => { stateFor(chatId).lastTurnAt = now() },
     tick,

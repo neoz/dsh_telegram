@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatLog, type ChatLogEntry } from '../src/chatlog.ts'
 import { Config, type IdleConfig } from '../src/config.ts'
 import {
@@ -295,6 +295,22 @@ describe('startIdle', () => {
     idle.stop()
     expect(api.callsTo('setReaction')).toHaveLength(1)
     expect(warns.some(m => m.includes('message_id 5'))).toBe(true)
+  })
+
+  it('starts no timer and enqueues nothing when disabled', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval'] })
+    try {
+      const idle = startIdle(deps('{"action":"skip"}', { config: { ...base, chatIds: [CHAT], enabled: false } }))
+      expect(vi.getTimerCount()).toBe(0)
+      await idle.tick()
+      idle.noteTurn(CHAT)
+      idle.stop()
+      expect(tasks).toHaveLength(0)
+      startIdle(deps('{"action":"skip"}')).stop()
+      expect(infos.some(m => m.includes('idle engagement on for 1 chat(s)'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('a task queued before stop does nothing', async () => {

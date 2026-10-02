@@ -98,21 +98,18 @@ async function start(ctx: Context, config: Config): Promise<Started> {
 
   const polling = startPolling(bot, config, log)
   log.info(`dsh-telegram: polling as @${bot.botInfo.username}`)
-  if (config.idle.enabled) {
-    idle = startIdle({
-      config: config.idle,
-      provider: config.provider,
-      model: config.model,
-      llm: ctx.llm,
-      api,
-      chatLog,
-      queue: dispatcher,
-      botId: bot.botInfo.id,
-      botUsername: bot.botInfo.username,
-      log,
-    })
-    log.info(`dsh-telegram: idle engagement on for ${config.idle.chatIds.length} chat(s)`)
-  }
+  idle = startIdle({
+    config: config.idle,
+    provider: config.provider,
+    model: config.model,
+    llm: ctx.llm,
+    api,
+    chatLog,
+    queue: dispatcher,
+    botId: bot.botInfo.id,
+    botUsername: bot.botInfo.username,
+    log,
+  })
   return { polling, agents, idle }
 }
 
