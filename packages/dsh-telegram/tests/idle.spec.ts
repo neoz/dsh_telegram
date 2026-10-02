@@ -283,6 +283,38 @@ describe('startIdle', () => {
     expect(tasks).toHaveLength(0) // maxPerDay 1 already used by the failed reaction
   })
 
+  it('a task queued before stop does nothing', async () => {
+    const d = deps('{"action":"react","message_id":5,"emoji":"\u{1F525}"}')
+    const idle = startIdle(d)
+    await idle.tick()
+    idle.stop()
+    await runQueued()
+    expect(d.calls).toHaveLength(0)
+    expect(api.calls).toHaveLength(0)
+  })
+
+  it('stop during the model call aborts it and sends nothing', async () => {
+    let release!: () => void
+    let signal: AbortSignal | undefined
+    const llm = {
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        signal = options.signal
+        await new Promise<void>((r) => { release = r })
+        yield { type: 'text-delta', index: 0, text: '{"action":"react","message_id":5,"emoji":"\u{1F525}"}' }
+        yield { type: 'finish', reason: { kind: 'stop' } } as never
+      },
+    }
+    const idle = startIdle(deps('', { llm }))
+    await idle.tick()
+    const running = tasks.shift()!()
+    await new Promise(r => setTimeout(r, 5))
+    idle.stop()
+    expect(signal?.aborted).toBe(true)
+    release()
+    await running
+    expect(api.calls).toHaveLength(0)
+  })
+
   it('a corrupted chat log in one chat does not stop the others', async () => {
     const OTHER = -6
     await mkdir(join(dir, 'log'), { recursive: true })

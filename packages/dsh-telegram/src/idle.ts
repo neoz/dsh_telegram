@@ -192,6 +192,8 @@ export function startIdle(deps: IdleDeps): IdleHandle {
   const random = deps.random ?? Math.random
   const system = idleSystemPrompt(config.persona, deps.model)
   const states = new Map<number, IdleState>()
+  // Aborted by stop(), so a task queued or running across a plugin reload never acts through the old bot.
+  const lifetime = new AbortController()
   const stateFor = (chatId: number): IdleState => {
     let state = states.get(chatId)
     if (state === undefined) {
@@ -202,6 +204,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
   }
 
   const engage = async (chatId: number): Promise<void> => {
+    if (lifetime.signal.aborted) return
     const entries = await deps.chatLog.readAll(chatId)
     // Re-check without the chance roll: the bot may have been addressed while this task waited.
     if (!shouldEngage(states.get(chatId), entries, now(), config, () => 0)) return
@@ -210,12 +213,17 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     let action: IdleAction
     try {
       action = await decide(deps.llm, entries.slice(-config.contextMessages), {
-        provider: deps.provider, model: deps.model, system, answered: answeredIds(entries), signal: AbortSignal.timeout(IDLE_TIMEOUT_MS),
+        provider: deps.provider,
+        model: deps.model,
+        system,
+        answered: answeredIds(entries),
+        signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDLE_TIMEOUT_MS)]),
       })
     } catch (error) {
-      log.warn(`dsh-telegram: chat ${chatId} idle decision failed: ${errorText(error)}`)
+      if (!lifetime.signal.aborted) log.warn(`dsh-telegram: chat ${chatId} idle decision failed: ${errorText(error)}`)
       return
     }
+    if (lifetime.signal.aborted) return
     log.info(`dsh-telegram: chat ${chatId} idle -> ${describeAction(action)}`)
     if (action.kind === 'skip') return
     const at = now()
@@ -262,6 +270,9 @@ export function startIdle(deps: IdleDeps): IdleHandle {
   return {
     noteTurn: (chatId) => { stateFor(chatId).lastTurnAt = now() },
     tick,
-    stop: () => clearInterval(timer),
+    stop: () => {
+      clearInterval(timer)
+      lifetime.abort()
+    },
   }
 }
