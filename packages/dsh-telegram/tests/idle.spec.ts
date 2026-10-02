@@ -1,10 +1,15 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { describe, expect, it } from 'vitest'
-import type { ChatLogEntry } from '../src/chatlog.ts'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ChatLog, type ChatLogEntry } from '../src/chatlog.ts'
 import { Config, type IdleConfig } from '../src/config.ts'
 import {
-  answeredIds, dayKey, decide, emptyIdleState, hourIn, IDLE_EMOJI, idleSystemPrompt, idleTranscript, parseDecision, shouldEngage, type IdleState,
+  answeredIds, dayKey, decide, emptyIdleState, hourIn, IDLE_EMOJI, idleSystemPrompt, idleTranscript, parseDecision, shouldEngage, startIdle,
+  type IdleDeps, type IdleState,
 } from '../src/idle.ts'
+import { FakeTelegramApi } from './helpers/fake-api.ts'
 
 const minimal = { botToken: 't', allowFrom: ['ann'], workspaceRoot: '/ws', dataDir: '/data', model: 'm' }
 const base: IdleConfig = Config({ ...minimal, idle: { enabled: true, chatIds: [-5] } }).idle
@@ -159,5 +164,128 @@ describe('decide', () => {
   it('names the finish reason when reasoning used up the tokens', async () => {
     const { llm } = fakeLlm('', 'max-tokens', 'thinking...')
     await expect(decide(llm, entries, options)).rejects.toThrow(/no text.*max-tokens/)
+  })
+})
+
+describe('startIdle', () => {
+  const CHAT = -5
+  let dir: string
+  let api: FakeTelegramApi
+  let chatLog: ChatLog
+  let tasks: Array<() => Promise<void>>
+  let busy: Set<number>
+  let infos: string[]
+  let warns: string[]
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'idle-'))
+    api = new FakeTelegramApi()
+    chatLog = new ChatLog(join(dir, 'log'))
+    tasks = []
+    busy = new Set()
+    infos = []
+    warns = []
+    for (const entry of active) await chatLog.append(CHAT, entry)
+  })
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
+
+  function deps(answer: string, extra: Partial<IdleDeps> = {}): IdleDeps & { calls: GenerateOptions[] } {
+    const { llm, calls } = fakeLlm(answer)
+    return {
+      config: { ...base, chatIds: [CHAT] }, provider: 'p', model: 'm', llm, api, chatLog,
+      queue: { enqueue: (_chatId, task) => { tasks.push(task) }, isBusy: chatId => busy.has(chatId) },
+      botId: 1, botUsername: 'dshbot',
+      log: { info: m => infos.push(m), warn: m => warns.push(m) },
+      now: () => NOON, random: hit, calls, ...extra,
+    }
+  }
+  async function runQueued(): Promise<void> {
+    while (tasks.length > 0) await tasks.shift()!()
+  }
+
+  it('replies to the picked message and logs the reply', async () => {
+    const idle = startIdle(deps('{"action":"reply","message_id":6,"text":"hehe"}'))
+    await idle.tick()
+    await runQueued()
+    idle.stop()
+    expect(api.callsTo('sendMessage')[0]!.args).toEqual([CHAT, 'hehe', { replyTo: { messageId: 6 } }])
+    expect((await chatLog.readAll(CHAT)).at(-1)).toMatchObject({ text: 'hehe', bot: true, reply_to: 6, user_id: 1 })
+    expect(infos.some(m => m.includes(`chat ${CHAT} idle -> reply on 6`))).toBe(true)
+  })
+
+  it('reacts with the picked emoji and is then idle-blocked by lastEngagedAt', async () => {
+    const idle = startIdle(deps('{"action":"react","message_id":5,"emoji":"\u{1F525}"}'))
+    await idle.tick()
+    await runQueued()
+    expect(api.callsTo('setReaction')[0]!.args).toEqual([CHAT, 5, '\u{1F525}'])
+    await idle.tick()
+    expect(tasks).toHaveLength(0)
+    idle.stop()
+  })
+
+  it('skips a busy chat', async () => {
+    busy.add(CHAT)
+    const idle = startIdle(deps('{"action":"skip"}'))
+    await idle.tick()
+    idle.stop()
+    expect(tasks).toHaveLength(0)
+  })
+
+  it('cancels the queued task when the bot was addressed meanwhile', async () => {
+    const d = deps('{"action":"react","message_id":5,"emoji":"\u{1F525}"}')
+    const idle = startIdle(d)
+    await idle.tick()
+    idle.noteTurn(CHAT)
+    await runQueued()
+    idle.stop()
+    expect(d.calls).toHaveLength(0)
+    expect(api.calls).toHaveLength(0)
+  })
+
+  it('a skip waits for fresh messages before asking again', async () => {
+    const d = deps('{"action":"skip"}')
+    const idle = startIdle(d)
+    await idle.tick()
+    await runQueued()
+    await idle.tick()
+    await runQueued()
+    idle.stop()
+    expect(d.calls).toHaveLength(1)
+    expect(infos.some(m => m.includes('idle -> skip'))).toBe(true)
+  })
+
+  it('invalid model output warns and sends nothing', async () => {
+    const idle = startIdle(deps('{"action":"react","message_id":5,"emoji":"\u{1F4A9}"}'))
+    await idle.tick()
+    await runQueued()
+    idle.stop()
+    expect(api.calls).toHaveLength(0)
+    expect(warns.some(m => m.includes('emoji'))).toBe(true)
+  })
+
+  it('a failed Telegram call still counts as an engagement', async () => {
+    api.failNext('setReaction', new Error('REACTION_INVALID'))
+    let now = NOON
+    const d = deps('{"action":"react","message_id":5,"emoji":"\u{1F525}"}', { config: { ...base, chatIds: [CHAT], maxPerDay: 1 }, now: () => now })
+    const idle = startIdle(d)
+    await idle.tick()
+    await runQueued()
+    expect(warns.some(m => m.includes('REACTION_INVALID'))).toBe(true)
+    now = NOON + 120 * MIN
+    for (let i = 0; i < 5; i++) await chatLog.append(CHAT, human(100 + i, 10, now))
+    await idle.tick()
+    idle.stop()
+    expect(tasks).toHaveLength(0) // maxPerDay 1 already used by the failed reaction
+  })
+
+  it('a corrupted chat log in one chat does not stop the others', async () => {
+    const OTHER = -6
+    await mkdir(join(dir, 'log'), { recursive: true })
+    await writeFile(join(dir, 'log', `${OTHER}.jsonl`), '{not json\n', 'utf8')
+    const idle = startIdle(deps('{"action":"skip"}', { config: { ...base, chatIds: [OTHER, CHAT] } }))
+    await idle.tick()
+    idle.stop()
+    expect(tasks).toHaveLength(1)
+    expect(warns.some(m => m.includes(`chat ${OTHER}`))).toBe(true)
   })
 })

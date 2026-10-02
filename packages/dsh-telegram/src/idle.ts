@@ -1,6 +1,7 @@
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { oneLine, senderLabel, type ChatLogEntry } from './chatlog.ts'
+import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
 import type { IdleConfig } from './config.ts'
+import type { TelegramApi } from './telegram-api.ts'
 
 /** Per-chat idle bookkeeping; times are epoch milliseconds, `day` is the local `dayKey`. */
 export interface IdleState { lastEngagedAt: number; lastTurnAt: number; lastAttemptAt: number; day: string; count: number }
@@ -143,4 +144,118 @@ export async function decide(llm: IdleLlm, entries: readonly ChatLogEntry[], opt
   if (finish !== 'stop' && finish !== 'max-tokens') throw new Error(`model call ended with ${finish}`)
   if (text.trim() === '') throw new Error(`model returned no text (finish: ${finish})`)
   return parseDecision(text, entries, options.answered)
+}
+
+export interface IdleQueue { enqueue(chatId: number, task: () => Promise<void>): void; isBusy(chatId: number): boolean }
+
+export interface IdleDeps {
+  config: IdleConfig
+  provider: string
+  model: string
+  llm: IdleLlm
+  api: TelegramApi
+  chatLog: ChatLog
+  queue: IdleQueue
+  botId: number
+  botUsername: string
+  log: { info(msg: string): void; warn(msg: string): void }
+  now?: () => number
+  random?: () => number
+}
+
+export interface IdleHandle {
+  noteTurn(chatId: number): void
+  /** Runs one check now; the interval calls it every checkIntervalMinutes. Resolves once tasks are enqueued. */
+  tick(): Promise<void>
+  stop(): void
+}
+
+const IDLE_TIMEOUT_MS = 60_000
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+function describeAction(action: IdleAction): string {
+  if (action.kind === 'skip') return 'skip'
+  return action.kind === 'react' ? `react ${action.emoji} on ${action.messageId}` : `reply on ${action.messageId}`
+}
+
+/** Periodically lets the bot join active groups that have not addressed it for a while. */
+export function startIdle(deps: IdleDeps): IdleHandle {
+  const { config, log } = deps
+  const now = deps.now ?? Date.now
+  const random = deps.random ?? Math.random
+  const system = idleSystemPrompt(config.persona, deps.model)
+  const states = new Map<number, IdleState>()
+  const stateFor = (chatId: number): IdleState => {
+    let state = states.get(chatId)
+    if (state === undefined) {
+      state = emptyIdleState()
+      states.set(chatId, state)
+    }
+    return state
+  }
+
+  const engage = async (chatId: number): Promise<void> => {
+    const entries = await deps.chatLog.readAll(chatId)
+    // Re-check without the chance roll: the bot may have been addressed while this task waited.
+    if (!shouldEngage(states.get(chatId), entries, now(), config, () => 0)) return
+    const state = stateFor(chatId)
+    state.lastAttemptAt = now()
+    let action: IdleAction
+    try {
+      action = await decide(deps.llm, entries.slice(-config.contextMessages), {
+        provider: deps.provider, model: deps.model, system, answered: answeredIds(entries), signal: AbortSignal.timeout(IDLE_TIMEOUT_MS),
+      })
+    } catch (error) {
+      log.warn(`dsh-telegram: chat ${chatId} idle decision failed: ${errorText(error)}`)
+      return
+    }
+    log.info(`dsh-telegram: chat ${chatId} idle -> ${describeAction(action)}`)
+    if (action.kind === 'skip') return
+    const at = now()
+    const day = dayKey(at, config.timezone)
+    state.count = state.day === day ? state.count + 1 : 1
+    state.day = day
+    state.lastEngagedAt = at
+    try {
+      if (action.kind === 'react') {
+        await deps.api.setReaction(chatId, action.messageId, action.emoji)
+        return
+      }
+      const sent = await deps.api.sendMessage(chatId, action.text, { replyTo: { messageId: action.messageId } })
+      await deps.chatLog.append(chatId, {
+        ts: new Date(at).toISOString(),
+        message_id: sent.messageId,
+        user_id: deps.botId,
+        name: deps.botUsername,
+        text: action.text,
+        reply_to: action.messageId,
+        bot: true,
+      })
+    } catch (error) {
+      log.warn(`dsh-telegram: chat ${chatId} idle ${action.kind} failed: ${errorText(error)}`)
+    }
+  }
+
+  const tick = async (): Promise<void> => {
+    for (const chatId of config.chatIds) {
+      if (deps.queue.isBusy(chatId)) continue
+      try {
+        const entries = await deps.chatLog.readAll(chatId)
+        if (!shouldEngage(states.get(chatId), entries, now(), config, random)) continue
+        deps.queue.enqueue(chatId, () => engage(chatId).catch((error: unknown) => {
+          log.warn(`dsh-telegram: chat ${chatId} idle task failed: ${errorText(error)}`)
+        }))
+      } catch (error) {
+        log.warn(`dsh-telegram: chat ${chatId} idle check failed: ${errorText(error)}`)
+      }
+    }
+  }
+
+  const timer = setInterval(() => { void tick() }, config.checkIntervalMinutes * MINUTE_MS).unref()
+  return {
+    noteTurn: (chatId) => { stateFor(chatId).lastTurnAt = now() },
+    tick,
+    stop: () => clearInterval(timer),
+  }
 }
