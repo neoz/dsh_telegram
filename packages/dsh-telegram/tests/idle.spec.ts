@@ -152,7 +152,7 @@ describe('decide', () => {
   it('sends one static system prompt and the transcript, and parses the answer', async () => {
     const { llm, calls } = fakeLlm('{"action":"react","message_id":2,"emoji":"\u{1F44D}"}')
     expect(await decide(llm, entries, options)).toEqual({ kind: 'react', messageId: 2, emoji: '\u{1F44D}' })
-    expect(calls[0]).toMatchObject({ provider: 'p', model: 'm', system: 'SYS', maxTokens: 300 })
+    expect(calls[0]).toMatchObject({ provider: 'p', model: 'm', system: 'SYS', maxTokens: 1024 })
     expect(calls[0]!.tools).toBeUndefined()
     expect(calls[0]!.reasoningEffort).toBeUndefined()
     expect(calls[0]!.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: idleTranscript(entries, options.answered) }] }])

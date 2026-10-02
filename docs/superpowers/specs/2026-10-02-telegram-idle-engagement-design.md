@@ -126,7 +126,7 @@ reply to an older message right before answering that user.
 ```
 
 Each line goes through `oneLine` so a message cannot forge another line.
-`maxTokens` is 300.
+`maxTokens` is 1024, leaving room for models that reason before answering.
 
 Allowed emoji: 👍 ❤ 🔥 😁 🤣 🤔 👀 🎉 👏 💯 🙈 😎 🤩 🤗 🫡. In code they are written
 as `\u{...}` escapes, like `ACK_REACTION`.

@@ -67,7 +67,7 @@ export interface DecideOptions { provider: string; model: string; system: string
 
 const DEFAULT_PERSONA = 'You are a friendly assistant and a member of this Telegram group.'
 const MAX_REPLY_CHARS = 500
-const IDLE_MAX_TOKENS = 300
+const IDLE_MAX_TOKENS = 1024
 
 const RULES = [
   'You are reading the latest messages of a group chat you belong to. Nobody has addressed you for a while.',
