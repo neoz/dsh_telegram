@@ -36,7 +36,9 @@ Every `checkIntervalMinutes` the scheduler looks at each chat in `idle.chatIds`.
    `lastTurnAt` (set whenever a message is handled, so a turn that failed,
    timed out, was stopped or produced no text still counts).
 2. **Active group**: at least `minNewMessages` human entries in the chat log
-   after the last bot activity.
+   after the later of the last bot activity and `lastAttemptAt` (the last LLM
+   call, whatever its outcome). A `skip` therefore waits for fresh messages
+   instead of asking the model again about the same conversation.
 3. **Under the daily cap**: fewer than `maxPerDay` engagements today, counted
    by calendar day in `timezone`.
 4. **Outside quiet hours**: the current hour in `timezone` is not in
@@ -54,7 +56,7 @@ export type IdleAction =
   | { kind: 'reply'; messageId: number; text: string }
   | { kind: 'skip' }
 
-export interface IdleState { lastEngagedAt: number; lastTurnAt: number; day: string; count: number }
+export interface IdleState { lastEngagedAt: number; lastTurnAt: number; lastAttemptAt: number; day: string; count: number }
 
 export function shouldEngage(state: IdleState | undefined, entries: ChatLogEntry[], now: number, config: IdleConfig, random: () => number): boolean
 export function decide(llm: IdleLlm, entries: ChatLogEntry[], options: DecideOptions): Promise<IdleAction>
@@ -77,7 +79,11 @@ tests substitute a fake.
 3. Enqueue a task on the chat's dispatcher queue. Inside the task, read the
    chat log again and re-run `shouldEngage` without the chance roll, since a
    user may have addressed the bot meanwhile.
-4. `decide` with the newest `contextMessages` entries.
+4. Set `lastAttemptAt = now`, then `decide` with the newest
+   `contextMessages` entries. Entries the bot already answered (the
+   `reply_to` of any bot entry) are marked so the model does not pick them:
+   a bot has one reaction per message, so reacting there would replace the
+   `ACK_REACTION`.
 5. Execute:
    - `react`: `api.setReaction(chatId, messageId, emoji)`.
    - `reply`: `api.sendMessage(chatId, text, { replyTo: messageId })` as plain
@@ -86,6 +92,9 @@ tests substitute a fake.
 6. After `react` or `reply`, set `lastEngagedAt = now` and increment the day
    counter, even when the Telegram call failed, so a broken group is not
    retried every tick.
+7. Log one info line per decision, e.g.
+   `dsh-telegram: chat <id> idle -> react <emoji> on <message_id>` or
+   `-> skip`, so `chance` and `idleMinutes` can be tuned from real data.
 
 Accepted race: a user addressing the bot while an idle task is already calling
 the LLM (about 1-3 s) waits in the queue behind it, so the bot may react to or
@@ -98,7 +107,8 @@ reply to an older message right before answering that user.
 - `idle.persona` (or the default).
 - Rules: you are reading a group chat; speak only when you have something
   genuinely worth adding; when unsure, choose `skip`; prefer a reaction over a
-  reply; never reply to the assistant's own messages.
+  reply; never pick the assistant's own messages or messages marked as already
+  answered; a reply is plain text (no markdown), one or two short sentences.
 - The allowed emoji list.
 - The output contract: a single JSON object
   `{"action":"react"|"reply"|"skip","message_id":number,"emoji":string,"text":string}`.
@@ -111,6 +121,7 @@ reply to an older message right before answering that user.
 <group_messages>
 [12345] @ann (Ann): ...
 [12346] assistant: ...
+[12347] (answered) @bob (Bob): ...
 </group_messages>
 ```
 
@@ -128,7 +139,7 @@ and does not count toward `maxPerDay`:
 - The text parses as JSON (a surrounding markdown code fence is tolerated) and
   `action` is one of the three values.
 - For `react` and `reply`: `message_id` is one of the entries sent in the
-  prompt and is not a bot entry.
+  prompt, is not a bot entry and is not marked as answered.
 - For `react`: `emoji` is in the allowed list.
 - For `reply`: `text` is non-empty after trimming; longer than 500 characters
   is truncated.
@@ -142,6 +153,8 @@ and does not count toward `maxPerDay`:
 - `src/bot.ts`: `BotDeps` gains optional `noteTurn(chatId)`; `handleMessage`
   calls it once the gate verdict is `handle` and the message is not a command,
   before the turn runs.
+- `src/bot.ts`: the bot chat-log entry written after a turn gains
+  `reply_to: message.message_id`, so answered messages are known.
 - `src/index.ts`: add `'llm'` to `inject`; start the scheduler after the bot
   starts when `idle.enabled` and pass its `noteTurn` to the dispatcher; stop it
   before polling stops.
@@ -151,6 +164,10 @@ and does not count toward `maxPerDay`:
 - `profile/telegram/cordis.patch.yml`: anchor `personaPrefix` as `&persona`
   and restate the `idle` block with `persona: *persona`, with a comment that
   the alias only resolves inside this file.
+- `docker-compose.yml`, `docker-compose.dev.yml`: pass `TELEGRAM_IDLE_ENABLED`
+  and `TELEGRAM_IDLE_CHATS` into the container.
+- `.env.example`: document both variables, noting that a group's chat id
+  appears in the bot log lines `chat <id> message ...`.
 
 ## Configuration
 
@@ -183,8 +200,9 @@ defaults unless set in the profile config.
 
 ## Error handling
 
-- LLM error, timeout or unparsable output: `skip`, warning logged, retried on a
-  later tick through the normal rules.
+- LLM error, timeout or unparsable output: `skip`, warning logged.
+  `lastAttemptAt` is already set, so the next attempt waits for
+  `minNewMessages` fresh messages.
 - `setReaction` / `sendMessage` failure (reactions disabled, bot removed):
   warning logged, still counted as an engagement.
 - Every tick and every task catches its own errors; one chat failing never
@@ -196,27 +214,38 @@ defaults unless set in the profile config.
 - `shouldEngage`: each condition alone, quiet hours wrapping midnight,
   `from === to`, the day counter resetting on a new day in `timezone`,
   reactions counted through `lastEngagedAt`, a handled turn counted through
-  `lastTurnAt` even without a bot chat-log entry.
+  `lastTurnAt` even without a bot chat-log entry, a `skip` blocking the next
+  attempt until `minNewMessages` arrive after `lastAttemptAt`.
+- `handleMessage` writes `reply_to` on the bot chat-log entry.
 - `handleMessage` calls `noteTurn` for a handled message and not for
   `log-only` messages or commands.
 - Profile patch: parsing `profile/telegram/cordis.patch.yml` with `js-yaml`
   yields `idle.persona` equal to `personaPrefix`; `{{model}}` is substituted in
   the idle system prompt.
 - `decide` with a fake LLM: valid react, valid reply, JSON in a code fence,
-  broken JSON, unknown `message_id`, a bot `message_id`, emoji outside the list,
-  empty text, over-long text, LLM throwing.
+  broken JSON, unknown `message_id`, a bot `message_id`, an answered
+  `message_id`, emoji outside the list, empty text, over-long text, LLM
+  throwing; the prompt marks answered entries.
 - Tick with `FakeTelegramApi` and a real `ChatLog` in a temp directory: reply
   sends and logs, react calls `setReaction`, a busy queue skips the chat, the
   in-task re-check cancels when the bot was addressed meanwhile, a failed
-  Telegram call still counts.
+  Telegram call still counts, one info log line per decision.
 - `createDispatcher`: `enqueue` runs after a queued message and `isBusy`
   reflects the queue.
 - Config: defaults, `enabled: false` starts no scheduler, invalid timezone
   rejected.
 
+## Known limitations
+
+- Idle replies never enter the chat's agent session. When a user answers one,
+  the agent sees it only through the quoted `> assistant: ...` block and
+  `<group_messages>`, so it may not recognise the words as its own.
+
 ## Out of scope
 
 - Silent groups (starting a conversation from nothing) and private chats.
+- A runtime switch such as `/idle on|off`; changing the env and restarting is
+  the way to toggle.
 - Persisting idle state across restarts.
 - Configurable emoji list, a separate model for idle decisions.
 - Using memory or tools in idle decisions.
