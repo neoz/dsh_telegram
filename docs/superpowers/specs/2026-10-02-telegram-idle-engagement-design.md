@@ -36,9 +36,14 @@ Every `checkIntervalMinutes` the scheduler looks at each chat in `idle.chatIds`.
    `lastTurnAt` (set whenever a message is handled, so a turn that failed,
    timed out, was stopped or produced no text still counts).
 2. **Active group**: at least `minNewMessages` human entries in the chat log
-   after the later of the last bot activity and `lastAttemptAt` (the last LLM
-   call, whatever its outcome). A `skip` therefore waits for fresh messages
-   instead of asking the model again about the same conversation.
+   after the latest of: the moment the bot went idle (last bot activity +
+   `idleMinutes`), `now - idleMinutes`, and `lastAttemptAt` (the last LLM
+   call, whatever its outcome). Messages from before the bot went idle belong
+   to its own conversation, and a backlog older than `idleMinutes` (e.g. last
+   night, seen at the end of quiet hours) is no ongoing conversation. A `skip`
+   waits for fresh messages instead of asking the model again about the same
+   conversation.
+   **Something to pick**: at least one pickable message (see Tick step 4).
 3. **Under the daily cap**: fewer than `maxPerDay` engagements today, counted
    by calendar day in `timezone`.
 4. **Outside quiet hours**: the current hour in `timezone` is not in
@@ -80,11 +85,13 @@ tests substitute a fake.
    chat log again and re-run `shouldEngage` without the chance roll, since a
    user may have addressed the bot meanwhile.
 4. Set `lastAttemptAt = now`, then `decide` with the newest
-   `contextMessages` entries. Entries the bot already answered (logged with
-   `handled: true` when they got a turn, or the `reply_to` of any bot entry)
-   and the last 50 messages idle reacted to (in memory) are marked so the
-   model does not pick them: a bot has one reaction per message, so reacting
-   there would replace the `ACK_REACTION` or the earlier idle reaction. The
+   `contextMessages` entries. Only pickable messages are marked `(open)`; the
+   rest is context. `pickableIds` keeps human messages of the ongoing
+   conversation, sent within the last `checkIntervalMinutes`, minus those the
+   bot already answered (logged with `handled: true` when they got a turn, or
+   the `reply_to` of any bot entry) and the last 50 messages idle reacted to
+   (in memory): a bot has one reaction per message, so reacting there would
+   replace the `ACK_REACTION` or the earlier idle reaction. The
    model call is aborted when the scheduler stops, and a disabled config
    starts no timer.
 5. Execute:
@@ -110,8 +117,8 @@ reply to an older message right before answering that user.
 - `idle.persona` (or the default).
 - Rules: you are reading a group chat; speak only when you have something
   genuinely worth adding; when unsure, choose `skip`; prefer a reaction over a
-  reply; never pick the assistant's own messages or messages marked as already
-  answered; a reply is plain text (no markdown), one or two short sentences.
+  reply; only pick a message marked `(open)`, the others are context; a reply
+  is plain text (no markdown), one or two short sentences.
 - The allowed emoji list.
 - The output contract: a single JSON object
   `{"action":"react"|"reply"|"skip","message_id":number,"emoji":string,"text":string}`.
@@ -124,7 +131,7 @@ reply to an older message right before answering that user.
 <group_messages>
 [12345] @ann (Ann): ...
 [12346] assistant: ...
-[12347] (answered) @bob (Bob): ...
+[12347] (open) @bob (Bob): ...
 </group_messages>
 ```
 
@@ -142,7 +149,7 @@ and does not count toward `maxPerDay`:
 - The text parses as JSON (a surrounding markdown code fence is tolerated) and
   `action` is one of the three values.
 - For `react` and `reply`: `message_id` is one of the entries sent in the
-  prompt, is not a bot entry and is not marked as answered.
+  prompt, is not a bot entry and is pickable.
 - For `react`: `emoji` is in the allowed list.
 - For `reply`: `text` is non-empty after trimming; longer than 500 characters
   is truncated.
@@ -218,7 +225,11 @@ defaults unless set in the profile config.
   `from === to`, the day counter resetting on a new day in `timezone`,
   reactions counted through `lastEngagedAt`, a handled turn counted through
   `lastTurnAt` even without a bot chat-log entry, a `skip` blocking the next
-  attempt until `minNewMessages` arrive after `lastAttemptAt`.
+  attempt until `minNewMessages` arrive after `lastAttemptAt`, messages from
+  before the bot went idle or older than `idleMinutes` not counted, no
+  engagement without a message in the last `checkIntervalMinutes`.
+- `pickableIds`: only the ongoing conversation, never answered, handled or
+  already reacted messages.
 - `handleMessage` writes `reply_to` on the bot chat-log entry.
 - `handleMessage` calls `noteTurn` for a handled message and not for
   `log-only` messages or commands.
@@ -226,9 +237,9 @@ defaults unless set in the profile config.
   yields `idle.persona` equal to `personaPrefix`; `{{model}}` is substituted in
   the idle system prompt.
 - `decide` with a fake LLM: valid react, valid reply, JSON in a code fence,
-  broken JSON, unknown `message_id`, a bot `message_id`, an answered
-  `message_id`, emoji outside the list, empty text, over-long text, LLM
-  throwing; the prompt marks answered entries.
+  broken JSON, unknown `message_id`, a bot `message_id`, a `message_id` that
+  is not pickable, emoji outside the list, empty text, over-long text, LLM
+  throwing; the prompt marks pickable entries `(open)`.
 - Tick with `FakeTelegramApi` and a real `ChatLog` in a temp directory: reply
   sends and logs, react calls `setReaction`, a busy queue skips the chat, the
   in-task re-check cancels when the bot was addressed meanwhile, a failed
