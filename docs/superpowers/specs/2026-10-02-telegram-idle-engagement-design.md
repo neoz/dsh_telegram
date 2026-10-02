@@ -19,7 +19,7 @@ session.
 | Scenario | Groups only, while humans are still chatting. Silent groups and private chats are out of scope. |
 | Action | The model chooses `react`, `reply` or `skip` from the recent chat log. |
 | LLM path | One-shot `ctx.llm.stream()` call with its own short system prompt. The chat's agent session is not touched, so its history and prompt cache stay intact. No tools. |
-| Persona | `idle.persona` in config; a neutral built-in sentence when empty. |
+| Persona | `idle.persona` in config; a neutral built-in sentence when empty. The deployment profile sets it with a YAML alias of the `system-prompt` row's `personaPrefix`, so there is one source of truth. `{{model}}` in it is replaced with `config.model`. `personaSuffix` (tool and memory instructions) is not used. |
 | Model | The bot's `provider` and `model`; no `reasoningEffort`. |
 | Opt-in | `idle.enabled` (default `false`) and an explicit `idle.chatIds` allowlist. |
 | State | `lastEngagedAt` and a per-day counter per chat, in memory only. A restart resets them; the worst case is a few extra engagements that day. |
@@ -31,8 +31,10 @@ Every `checkIntervalMinutes` the scheduler looks at each chat in `idle.chatIds`.
 `shouldEngage` returns true only when all of these hold:
 
 1. **Idle**: more than `idleMinutes` since the last bot activity. Last bot
-   activity is the later of the newest chat-log entry with `bot: true` and
-   `lastEngagedAt` (reactions are not written to the chat log).
+   activity is the latest of the newest chat-log entry with `bot: true`,
+   `lastEngagedAt` (reactions are not written to the chat log) and
+   `lastTurnAt` (set whenever a message is handled, so a turn that failed,
+   timed out, was stopped or produced no text still counts).
 2. **Active group**: at least `minNewMessages` human entries in the chat log
    after the last bot activity.
 3. **Under the daily cap**: fewer than `maxPerDay` engagements today, counted
@@ -52,11 +54,16 @@ export type IdleAction =
   | { kind: 'reply'; messageId: number; text: string }
   | { kind: 'skip' }
 
-export interface IdleState { lastEngagedAt: number; day: string; count: number }
+export interface IdleState { lastEngagedAt: number; lastTurnAt: number; day: string; count: number }
 
 export function shouldEngage(state: IdleState | undefined, entries: ChatLogEntry[], now: number, config: IdleConfig, random: () => number): boolean
 export function decide(llm: IdleLlm, entries: ChatLogEntry[], options: DecideOptions): Promise<IdleAction>
-export function startIdle(deps: IdleDeps): () => void   // returns the stop function
+export function startIdle(deps: IdleDeps): IdleHandle
+
+export interface IdleHandle {
+  noteTurn(chatId: number): void   // records lastTurnAt = now
+  stop(): void
+}
 ```
 
 `IdleLlm` is the structural slice of `LlmRuntime` the module uses (`stream`), so
@@ -79,6 +86,10 @@ tests substitute a fake.
 6. After `react` or `reply`, set `lastEngagedAt = now` and increment the day
    counter, even when the Telegram call failed, so a broken group is not
    retried every tick.
+
+Accepted race: a user addressing the bot while an idle task is already calling
+the LLM (about 1-3 s) waits in the queue behind it, so the bot may react to or
+reply to an older message right before answering that user.
 
 ## Prompt
 
@@ -128,10 +139,18 @@ and does not count toward `maxPerDay`:
   `enqueue(chatId, task)` appends a task to the chat's queue; message handling
   uses it unchanged, commands still bypass it. `isBusy(chatId)` reports whether
   the chat has a queued or running task.
+- `src/bot.ts`: `BotDeps` gains optional `noteTurn(chatId)`; `handleMessage`
+  calls it once the gate verdict is `handle` and the message is not a command,
+  before the turn runs.
 - `src/index.ts`: add `'llm'` to `inject`; start the scheduler after the bot
-  starts when `idle.enabled`; stop it before polling stops.
+  starts when `idle.enabled` and pass its `noteTurn` to the dispatcher; stop it
+  before polling stops.
 - `src/config.ts`: new `idle` block (below).
-- `cordis.patch.yml`: map the `idle` fields from environment variables.
+- `cordis.patch.yml` (bundle): map `enabled` and `chatIds` from environment
+  variables.
+- `profile/telegram/cordis.patch.yml`: anchor `personaPrefix` as `&persona`
+  and restate the `idle` block with `persona: *persona`, with a comment that
+  the alias only resolves inside this file.
 
 ## Configuration
 
@@ -147,19 +166,19 @@ interface IdleConfig {
   quietHours: { from: number; to: number }  // default { from: 23, to: 7 }, 0..23
   timezone: string              // default 'Asia/Ho_Chi_Minh', IANA name
   contextMessages: number       // default 20, min 1
-  persona: string               // default ''
+  persona: string               // default ''; may contain {{model}}
 }
 ```
 
-Environment variables in `cordis.patch.yml`:
+Environment variables:
 
 | Variable | Field |
 |---|---|
 | `TELEGRAM_IDLE_ENABLED` | `enabled` (`'true'` enables) |
 | `TELEGRAM_IDLE_CHATS` | `chatIds`, comma-separated integers |
-| `TELEGRAM_IDLE_PERSONA` | `persona` |
 
-The other fields keep their defaults unless set in the profile config.
+`persona` comes from the YAML alias in the profile; the other fields keep their
+defaults unless set in the profile config.
 `assertConfig` rejects an invalid `timezone` (via `Intl.DateTimeFormat`).
 
 ## Error handling
@@ -176,7 +195,13 @@ The other fields keep their defaults unless set in the profile config.
 
 - `shouldEngage`: each condition alone, quiet hours wrapping midnight,
   `from === to`, the day counter resetting on a new day in `timezone`,
-  reactions counted through `lastEngagedAt`.
+  reactions counted through `lastEngagedAt`, a handled turn counted through
+  `lastTurnAt` even without a bot chat-log entry.
+- `handleMessage` calls `noteTurn` for a handled message and not for
+  `log-only` messages or commands.
+- Profile patch: parsing `profile/telegram/cordis.patch.yml` with `js-yaml`
+  yields `idle.persona` equal to `personaPrefix`; `{{model}}` is substituted in
+  the idle system prompt.
 - `decide` with a fake LLM: valid react, valid reply, JSON in a code fence,
   broken JSON, unknown `message_id`, a bot `message_id`, emoji outside the list,
   empty text, over-long text, LLM throwing.
