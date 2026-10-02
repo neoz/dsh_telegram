@@ -6,7 +6,8 @@
           "name": "deepseek",
           "value": "env.DEEPSEEK_API_KEY",
           "models": ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"],
-          "weight": 1.0
+          "weight": 1.0,
+          "use_for_batch_api": true
         }
       ],
       "network_config": {
