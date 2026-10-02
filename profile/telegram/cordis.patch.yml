@@ -2,7 +2,8 @@
 # This deployment gives the assistant a Vietnamese-speaking, playful persona.
 - id: system-prompt
   config:
-    personaPrefix: >-
+    # Anchored so the telegram row's idle.persona reuses it; the alias only resolves inside this file.
+    personaPrefix: &persona >-
       Bạn là một trợ lý AI chạy trên model {{model}}, nói chuyện qua Telegram.
       Tính cách: một cô em gái tinh nghịch, hay châm biếm nhẹ nhàng, thích trêu chọc
       người dùng bằng những câu đùa dí dỏm, nhưng luôn hoàn thành việc được nhờ
@@ -38,6 +39,10 @@
     dataDir: !!js process.env.DSH_TELEGRAM_DATA ?? '/data'
     model: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
     superAdmins: !!js (process.env.TELEGRAM_SUPER_ADMINS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0)
+    idle:
+      enabled: !!js process.env.TELEGRAM_IDLE_ENABLED === 'true'
+      chatIds: !!js (process.env.TELEGRAM_IDLE_CHATS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n !== 0)
+      persona: *persona
     status:
       thinking: Đang suy nghĩ...
       web: Đang tìm trên web...

@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-attachment'
+import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
 import { autoRetry } from '@grammyjs/auto-retry'
 import { run, type RunnerHandle } from '@grammyjs/runner'
@@ -10,6 +11,7 @@ import { Bot } from 'grammy'
 import { createDispatcher } from './bot.ts'
 import { ChatLog } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
+import { startIdle, type IdleHandle } from './idle.ts'
 import type { TelegramMessage } from './inbound.ts'
 import { MemoryStore } from './memory.ts'
 import { sweepOldFiles } from './retention.ts'
@@ -25,9 +27,9 @@ export type { Config as TelegramConfig } from './config.ts'
 /** Cordis plugin name. */
 export const name = 'dsh-telegram'
 /** Services required before the bot starts. */
-export const inject = ['agents', 'tools', 'attachments', 'loader']
+export const inject = ['agents', 'tools', 'attachments', 'loader', 'llm']
 
-interface Started { polling: Polling; agents: ChatAgents }
+interface Started { polling: Polling; agents: ChatAgents; idle: IdleHandle | undefined }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -77,6 +79,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     log,
   })
 
+  let idle: IdleHandle | undefined
   const dispatcher = createDispatcher({
     api,
     config,
@@ -88,13 +91,29 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     botId: bot.botInfo.id,
     botUsername: bot.botInfo.username,
     log,
+    noteTurn: chatId => idle?.noteTurn(chatId),
   })
   bot.on('message', (update) => { dispatcher.dispatch(update.message as unknown as TelegramMessage) })
   bot.catch((error) => { log.error(`dsh-telegram: update handler failed: ${String(error.error)}`) })
 
   const polling = startPolling(bot, config, log)
   log.info(`dsh-telegram: polling as @${bot.botInfo.username}`)
-  return { polling, agents }
+  if (config.idle.enabled) {
+    idle = startIdle({
+      config: config.idle,
+      provider: config.provider,
+      model: config.model,
+      llm: ctx.llm,
+      api,
+      chatLog,
+      queue: dispatcher,
+      botId: bot.botInfo.id,
+      botUsername: bot.botInfo.username,
+      log,
+    })
+    log.info(`dsh-telegram: idle engagement on for ${config.idle.chatIds.length} chat(s)`)
+  }
+  return { polling, agents, idle }
 }
 
 interface Polling { stop(): Promise<void> }
@@ -152,6 +171,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {
     void start(ctx, config).then((result) => {
       if (stopped) {
+        result.idle?.stop()
         void result.polling.stop().then(() => result.agents.disposeAll())
         return
       }
@@ -162,8 +182,9 @@ export function apply(ctx: Context, config: Config): void {
     return () => {
       stopped = true
       if (started === undefined) return
-      const { polling, agents } = started
+      const { polling, agents, idle } = started
       started = undefined
+      idle?.stop()
       void polling.stop().then(() => agents.disposeAll())
     }
   }, 'dsh-telegram: bot runner')
