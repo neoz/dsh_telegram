@@ -20,6 +20,21 @@ export interface StatusLabels {
   readonly other: string
 }
 
+/** Unprompted engagement in active groups; see the idle engagement spec. */
+export interface IdleConfig {
+  readonly enabled: boolean
+  readonly chatIds: number[]
+  readonly idleMinutes: number
+  readonly minNewMessages: number
+  readonly chance: number
+  readonly checkIntervalMinutes: number
+  readonly maxPerDay: number
+  readonly quietHours: { readonly from: number; readonly to: number }
+  readonly timezone: string
+  readonly contextMessages: number
+  readonly persona: string
+}
+
 /** Plugin configuration; see the design spec for field semantics. */
 export interface Config {
   readonly botToken: string
@@ -42,6 +57,8 @@ export interface Config {
   /** Telegram user ids allowed to add, replace, or forget global memory entries. */
   readonly superAdmins: number[]
   readonly memory: MemoryLimits
+  /** Unprompted reactions and replies in active groups. */
+  readonly idle: IdleConfig
 }
 
 const DEFAULT_STATUS: StatusLabels = {
@@ -52,6 +69,20 @@ const DEFAULT_STATUS: StatusLabels = {
   command: 'Running a command...',
   send: 'Sending a file...',
   other: 'Working...',
+}
+
+const DEFAULT_IDLE: IdleConfig = {
+  enabled: false,
+  chatIds: [],
+  idleMinutes: 60,
+  minNewMessages: 5,
+  chance: 0.3,
+  checkIntervalMinutes: 10,
+  maxPerDay: 5,
+  quietHours: { from: 23, to: 7 },
+  timezone: 'Asia/Ho_Chi_Minh',
+  contextMessages: 20,
+  persona: '',
 }
 
 export const Config: z<Config> = z.object({
@@ -89,6 +120,22 @@ export const Config: z<Config> = z.object({
     maxGlobalEntries: z.number().min(1).default(50),
     maxEntryChars: z.number().min(1).default(200),
   }).default({ maxEntries: 50, maxGlobalEntries: 50, maxEntryChars: 200 }),
+  idle: z.object({
+    enabled: z.boolean().default(DEFAULT_IDLE.enabled),
+    chatIds: z.array(z.number()).default([]),
+    idleMinutes: z.number().min(1).default(DEFAULT_IDLE.idleMinutes),
+    minNewMessages: z.number().min(1).default(DEFAULT_IDLE.minNewMessages),
+    chance: z.number().min(0).max(1).default(DEFAULT_IDLE.chance),
+    checkIntervalMinutes: z.number().min(1).default(DEFAULT_IDLE.checkIntervalMinutes),
+    maxPerDay: z.number().min(1).default(DEFAULT_IDLE.maxPerDay),
+    quietHours: z.object({
+      from: z.number().min(0).max(23).default(DEFAULT_IDLE.quietHours.from),
+      to: z.number().min(0).max(23).default(DEFAULT_IDLE.quietHours.to),
+    }).default(DEFAULT_IDLE.quietHours),
+    timezone: z.string().default(DEFAULT_IDLE.timezone),
+    contextMessages: z.number().min(1).default(DEFAULT_IDLE.contextMessages),
+    persona: z.string().default(DEFAULT_IDLE.persona),
+  }).default(DEFAULT_IDLE),
 })
 
 /** Checks Schemastery cannot express; throws on the first violation. */
@@ -98,5 +145,10 @@ export function assertConfig(config: Config): void {
     if (!config[key].startsWith('/') && !/^[A-Za-z]:[\/]/.test(config[key])) {
       throw new Error(`dsh-telegram: ${key} must be an absolute path`)
     }
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: config.idle.timezone })
+  } catch {
+    throw new Error(`dsh-telegram: idle.timezone must be an IANA time zone, got ${config.idle.timezone}`)
   }
 }

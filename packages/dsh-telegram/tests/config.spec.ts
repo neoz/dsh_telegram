@@ -69,4 +69,36 @@ describe('Config', () => {
   it('rejects memory caps below one', () => {
     expect(() => Config({ ...minimal, memory: { maxEntryChars: 0 } })).toThrow()
   })
+
+  it('fills idle defaults with idle disabled', () => {
+    expect(Config(minimal).idle).toEqual({
+      enabled: false,
+      chatIds: [],
+      idleMinutes: 60,
+      minNewMessages: 5,
+      chance: 0.3,
+      checkIntervalMinutes: 10,
+      maxPerDay: 5,
+      quietHours: { from: 23, to: 7 },
+      timezone: 'Asia/Ho_Chi_Minh',
+      contextMessages: 20,
+      persona: '',
+    })
+  })
+
+  it('accepts partial idle overrides', () => {
+    const idle = Config({ ...minimal, idle: { enabled: true, chatIds: [-1001234567890], quietHours: { from: 0 } } }).idle
+    expect(idle.enabled).toBe(true)
+    expect(idle.chatIds).toEqual([-1001234567890])
+    expect(idle.quietHours).toEqual({ from: 0, to: 7 })
+    expect(idle.chance).toBe(0.3)
+  })
+
+  it('rejects an idle chance above 1', () => {
+    expect(() => Config({ ...minimal, idle: { chance: 1.5 } })).toThrow()
+  })
+
+  it('rejects an unknown idle timezone', () => {
+    expect(() => assertConfig(Config({ ...minimal, idle: { timezone: 'Mars/Olympus' } }))).toThrow(/idle.timezone/)
+  })
 })
