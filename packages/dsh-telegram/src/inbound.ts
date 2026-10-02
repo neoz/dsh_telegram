@@ -62,6 +62,10 @@ function bodyText(message: TelegramMessage): string {
   return [message.text, message.caption].filter((t): t is string => t !== undefined && t !== '').join('\n')
 }
 
+function stickerMarker(sticker: NonNullable<TelegramMessage['sticker']>): string {
+  return sticker.emoji === undefined ? '[sticker]' : `[sticker: ${sticker.emoji}]`
+}
+
 function largestPhoto(photo: TelegramMessage['photo']): FileRef | undefined {
   if (photo === undefined || photo.length === 0) return undefined
   return photo.reduce((best, p) => (p.width * p.height > best.width * best.height ? p : best))
@@ -122,7 +126,7 @@ export function logEntryFor(message: TelegramMessage, savedFiles: string[] = [])
     user_id: sender.id,
     ...(sender.username === undefined ? {} : { username: sender.username }),
     name: sender.first_name,
-    text: text !== '' ? text : message.sticker !== undefined ? '[sticker]' : message.photo !== undefined ? '[photo]' : '',
+    text: text !== '' ? text : message.sticker !== undefined ? stickerMarker(message.sticker) : message.photo !== undefined ? '[photo]' : '',
     ...(message.reply_to_message === undefined ? {} : { reply_to: message.reply_to_message.message_id }),
     ...(savedFiles.length === 0 ? {} : { media: savedFiles }),
   }
@@ -145,9 +149,7 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
   const media = await saveMedia(message, options.api, options.inboxDir)
   savedFiles.push(...media.paths)
   parts.push(...media.markers)
-  if (message.sticker !== undefined) {
-    parts.push(message.sticker.emoji === undefined ? '[sticker]' : `[sticker: ${message.sticker.emoji}]`)
-  }
+  if (message.sticker !== undefined) parts.push(stickerMarker(message.sticker))
 
   let text = parts.join('\n')
   if (text === '') text = '[empty message]'

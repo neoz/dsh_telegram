@@ -37,6 +37,10 @@ describe('mentions and names', () => {
   it('logEntryFor records a photo-only message', () => {
     expect(logEntryFor(msg({ photo: [{ file_id: 'p', file_unique_id: 'up', width: 1, height: 1 }] })).text).toBe('[photo]')
   })
+  it('logEntryFor keeps the sticker emoji', () => {
+    expect(logEntryFor(msg({ sticker: { emoji: ':)' } })).text).toBe('[sticker: :)]')
+    expect(logEntryFor(msg({ sticker: {} })).text).toBe('[sticker]')
+  })
 })
 
 describe('saveObservedPhoto', () => {
