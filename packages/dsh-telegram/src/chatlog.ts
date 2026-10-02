@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-/** One observed Telegram message; bot replies carry `bot: true`. */
+/** One observed Telegram message; bot replies carry `bot: true`, messages that got a turn carry `handled: true`. */
 export interface ChatLogEntry {
   ts: string
   message_id: number
@@ -12,6 +12,7 @@ export interface ChatLogEntry {
   reply_to?: number
   media?: string[]
   bot?: true
+  handled?: true
 }
 
 /** Folds line breaks so text rendered as one line of a block cannot forge another line (e.g. a fake sender). */

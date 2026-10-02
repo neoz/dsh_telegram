@@ -3,13 +3,17 @@ import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog
 import type { IdleConfig } from './config.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
-/** Per-chat idle bookkeeping; times are epoch milliseconds, `day` is the local `dayKey`. */
-export interface IdleState { lastEngagedAt: number; lastTurnAt: number; lastAttemptAt: number; day: string; count: number }
+/**
+ * Per-chat idle bookkeeping; times are epoch milliseconds, `day` is the local `dayKey`.
+ * `reacted` holds the newest messages idle reacted to: reactions are not logged, and a second one would replace the first.
+ */
+export interface IdleState { lastEngagedAt: number; lastTurnAt: number; lastAttemptAt: number; day: string; count: number; reacted: number[] }
 
 const MINUTE_MS = 60_000
+const MAX_REACTED = 50
 
 export function emptyIdleState(): IdleState {
-  return { lastEngagedAt: 0, lastTurnAt: 0, lastAttemptAt: 0, day: '', count: 0 }
+  return { lastEngagedAt: 0, lastTurnAt: 0, lastAttemptAt: 0, day: '', count: 0, reacted: [] }
 }
 
 export function dayKey(now: number, timezone: string): string {
@@ -31,9 +35,12 @@ export function lastBotActivity(state: IdleState, entries: readonly ChatLogEntry
   return Math.max(lastBot === undefined ? 0 : Date.parse(lastBot.ts), state.lastEngagedAt, state.lastTurnAt)
 }
 
-/** Messages a bot entry replied to; the bot's ACK reaction sits on them. */
+/** Messages that got a turn or a bot reply; the bot's ACK reaction sits on them. */
 export function answeredIds(entries: readonly ChatLogEntry[]): Set<number> {
-  return new Set(entries.flatMap(e => (e.bot === true && e.reply_to !== undefined ? [e.reply_to] : [])))
+  return new Set(entries.flatMap((e) => {
+    if (e.handled === true) return [e.message_id]
+    return e.bot === true && e.reply_to !== undefined ? [e.reply_to] : []
+  }))
 }
 
 export function shouldEngage(state: IdleState | undefined, entries: readonly ChatLogEntry[], now: number, config: IdleConfig, random: () => number): boolean {
@@ -216,7 +223,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
         provider: deps.provider,
         model: deps.model,
         system,
-        answered: answeredIds(entries),
+        answered: new Set([...answeredIds(entries), ...state.reacted]),
         signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDLE_TIMEOUT_MS)]),
       })
     } catch (error) {
@@ -233,6 +240,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     state.lastEngagedAt = at
     try {
       if (action.kind === 'react') {
+        state.reacted = [...state.reacted, action.messageId].slice(-MAX_REACTED)
         await deps.api.setReaction(chatId, action.messageId, action.emoji)
         return
       }

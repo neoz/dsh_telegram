@@ -276,6 +276,14 @@ describe('handleMessage', () => {
     expect(noteTurn).toHaveBeenCalledWith(5)
   })
 
+  it('marks handled messages in the chat log, but not log-only ones', async () => {
+    await handleMessage(msg({ text: 'chatter' }, 'supergroup', 20), deps)
+    await handleMessage(msg({ text: 'hello' }), deps)
+    const log = await deps.chatLog.readAll(5)
+    expect(log.find(e => e.message_id === 20)?.handled).toBeUndefined()
+    expect(log.find(e => e.message_id === 10)).toMatchObject({ text: 'hello', handled: true })
+  })
+
   it('enqueue runs after a queued message and isBusy tracks the queue', async () => {
     let releaseFirst!: () => void
     agents.resolve.mockImplementationOnce(async () => { await new Promise<void>((r) => { releaseFirst = r }); throw new Error('boom') })

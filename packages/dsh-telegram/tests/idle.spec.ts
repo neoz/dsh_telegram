@@ -80,8 +80,8 @@ describe('idle helpers', () => {
     expect(dayKey(Date.parse('2026-10-01T17:30:00Z'), 'Asia/Ho_Chi_Minh')).toBe('2026-10-02')
     expect(hourIn(Date.parse('2026-10-01T17:30:00Z'), 'Asia/Ho_Chi_Minh')).toBe(0)
   })
-  it('collects the messages the bot answered', () => {
-    expect(answeredIds([human(2, 10), bot(3, 5, 2), bot(4, 4)])).toEqual(new Set([2]))
+  it('collects the messages the bot answered or handled', () => {
+    expect(answeredIds([human(2, 10), bot(3, 5, 2), bot(4, 4), { ...human(5, 3), handled: true }])).toEqual(new Set([2, 5]))
   })
 })
 
@@ -281,6 +281,20 @@ describe('startIdle', () => {
     await idle.tick()
     idle.stop()
     expect(tasks).toHaveLength(0) // maxPerDay 1 already used by the failed reaction
+  })
+
+  it('never picks a message it already reacted to', async () => {
+    let now = NOON
+    const idle = startIdle(deps('{"action":"react","message_id":5,"emoji":"\u{1F525}"}', { now: () => now }))
+    await idle.tick()
+    await runQueued()
+    now = NOON + 120 * MIN
+    for (let i = 0; i < 5; i++) await chatLog.append(CHAT, human(100 + i, 10, now))
+    await idle.tick()
+    await runQueued()
+    idle.stop()
+    expect(api.callsTo('setReaction')).toHaveLength(1)
+    expect(warns.some(m => m.includes('message_id 5'))).toBe(true)
   })
 
   it('a task queued before stop does nothing', async () => {

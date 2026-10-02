@@ -121,7 +121,7 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   const inbound = await parseInbound(message, {
     api: deps.api, inboxDir: join(workspaceDir, 'inbox'), botId: deps.botId, botUsername: deps.botUsername,
   })
-  await deps.chatLog.append(chatId, inbound.logEntry)
+  await deps.chatLog.append(chatId, { ...inbound.logEntry, handled: true })
   await deps.api.setReaction(chatId, message.message_id, ACK_REACTION)
 
   const resolved = await deps.agents.resolve(chatId)
