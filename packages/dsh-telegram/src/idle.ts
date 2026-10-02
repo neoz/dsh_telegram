@@ -1,4 +1,4 @@
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
 import type { IdleConfig } from './config.ts'
 import type { TelegramApi } from './telegram-api.ts'
@@ -134,6 +134,8 @@ export async function decide(llm: IdleLlm, entries: readonly ChatLogEntry[], opt
     provider: options.provider,
     model: options.model,
     system: options.system,
+    // Adapters default to thinking when no effort is given; a quick decision must not spend its budget on it.
+    reasoningEffort: ReasoningEffortId('off'),
     maxTokens: IDLE_MAX_TOKENS,
     messages: [{ role: 'user', content: [{ type: 'text', text: idleTranscript(entries, options.answered) }] }],
     ...(options.signal === undefined ? {} : { signal: options.signal }),

@@ -154,7 +154,8 @@ describe('decide', () => {
     expect(await decide(llm, entries, options)).toEqual({ kind: 'react', messageId: 2, emoji: '\u{1F44D}' })
     expect(calls[0]).toMatchObject({ provider: 'p', model: 'm', system: 'SYS', maxTokens: 1024 })
     expect(calls[0]!.tools).toBeUndefined()
-    expect(calls[0]!.reasoningEffort).toBeUndefined()
+    // Adapters default to thinking when no effort is given; a quick decision must not spend its budget on it.
+    expect(calls[0]!.reasoningEffort).toBe('off')
     expect(calls[0]!.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: idleTranscript(entries, options.answered) }] }])
   })
   it('throws when the model call fails', async () => {

@@ -20,7 +20,7 @@ session.
 | Action | The model chooses `react`, `reply` or `skip` from the recent chat log. |
 | LLM path | One-shot `ctx.llm.stream()` call with its own short system prompt. The chat's agent session is not touched, so its history and prompt cache stay intact. No tools. |
 | Persona | `idle.persona` in config; a neutral built-in sentence when empty. The deployment profile sets it with a YAML alias of the `system-prompt` row's `personaPrefix`, so there is one source of truth. `{{model}}` in it is replaced with `config.model`. `personaSuffix` (tool and memory instructions) is not used. |
-| Model | The bot's `provider` and `model`; no `reasoningEffort`. |
+| Model | The bot's `provider` and `model` with `reasoningEffort: 'off'`: adapters default to thinking when no effort is given, which would spend the token budget before any JSON. |
 | Opt-in | `idle.enabled` (default `false`) and an explicit `idle.chatIds` allowlist. |
 | State | `lastEngagedAt` and a per-day counter per chat, in memory only. A restart resets them; the worst case is a few extra engagements that day. |
 | Reactions | A fixed set of 15 emoji that Telegram accepts from bots. Not configurable. |
