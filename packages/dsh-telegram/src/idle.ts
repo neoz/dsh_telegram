@@ -130,6 +130,7 @@ export function parseDecision(raw: string, entries: readonly ChatLogEntry[], ans
 export async function decide(llm: IdleLlm, entries: readonly ChatLogEntry[], options: DecideOptions): Promise<IdleAction> {
   let text = ''
   let finish = 'none'
+  let failure = ''
   for await (const chunk of llm.stream({
     provider: options.provider,
     model: options.model,
@@ -141,9 +142,12 @@ export async function decide(llm: IdleLlm, entries: readonly ChatLogEntry[], opt
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   })) {
     if (chunk.type === 'text-delta') text += chunk.text
-    if (chunk.type === 'finish') finish = chunk.reason.kind
+    if (chunk.type === 'finish') {
+      finish = chunk.reason.kind
+      if ('failure' in chunk.reason) failure = `: ${chunk.reason.failure.message}`
+    }
   }
-  if (finish !== 'stop' && finish !== 'max-tokens') throw new Error(`model call ended with ${finish}`)
+  if (finish !== 'stop' && finish !== 'max-tokens') throw new Error(`model call ended with ${finish}${failure}`)
   if (text.trim() === '') throw new Error(`model returned no text (finish: ${finish})`)
   return parseDecision(text, entries, options.answered)
 }

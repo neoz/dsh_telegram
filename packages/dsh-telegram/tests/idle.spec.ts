@@ -158,9 +158,13 @@ describe('decide', () => {
     expect(calls[0]!.reasoningEffort).toBe('off')
     expect(calls[0]!.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: idleTranscript(entries, options.answered) }] }])
   })
-  it('throws when the model call fails', async () => {
-    const { llm } = fakeLlm('', 'error')
-    await expect(decide(llm, entries, options)).rejects.toThrow(/error/)
+  it('throws with the provider failure when the model call fails', async () => {
+    const llm = {
+      async *stream(): AsyncIterable<StreamChunk> {
+        yield { type: 'finish', reason: { kind: 'error', failure: { message: 'rate limited', code: 'rate_limit' } } } as never
+      },
+    }
+    await expect(decide(llm, entries, options)).rejects.toThrow('model call ended with error: rate limited')
   })
   it('names the finish reason when reasoning used up the tokens', async () => {
     const { llm } = fakeLlm('', 'max-tokens', 'thinking...')
