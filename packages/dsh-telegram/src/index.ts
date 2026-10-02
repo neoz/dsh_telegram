@@ -77,7 +77,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     log,
   })
 
-  const dispatch = createDispatcher({
+  const dispatcher = createDispatcher({
     api,
     config,
     chatLog,
@@ -89,7 +89,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     botUsername: bot.botInfo.username,
     log,
   })
-  bot.on('message', (update) => { dispatch(update.message as unknown as TelegramMessage) })
+  bot.on('message', (update) => { dispatcher.dispatch(update.message as unknown as TelegramMessage) })
   bot.catch((error) => { log.error(`dsh-telegram: update handler failed: ${String(error.error)}`) })
 
   const polling = startPolling(bot, config, log)

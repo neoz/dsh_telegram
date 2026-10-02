@@ -28,6 +28,8 @@ export interface BotDeps {
   botId: number
   botUsername: string
   log: { info(msg: string): void; warn(msg: string): void; error(msg: string): void }
+  /** Called when a message is about to get a turn (not for commands or log-only messages). */
+  noteTurn?: (chatId: number) => void
 }
 
 export function isAllowed(user: TelegramUser, allowFrom: readonly string[]): boolean {
@@ -110,6 +112,7 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     await deps.api.sendMessage(chatId, HELP_TEXT)
     return
   }
+  deps.noteTurn?.(chatId)
 
   // Telegram stamps `date` when the sender hit send; the gap to now is delivery lag outside this process.
   const receivedAt = Date.now()
@@ -169,6 +172,7 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
       user_id: deps.botId,
       name: deps.botUsername,
       text: result.text,
+      reply_to: message.message_id,
       bot: true,
     })
   }
@@ -177,29 +181,46 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     + ` (lag ${seconds(lagMs)}, prep ${seconds(prepMs)}, agent ${seconds(result.timing.agentMs)}, deliver ${seconds(result.timing.deliverMs)})`)
 }
 
+export interface Dispatcher {
+  dispatch(message: TelegramMessage): void
+  /** Appends a task to the chat's queue; tasks of one chat never overlap. */
+  enqueue(chatId: number, task: () => Promise<void>): void
+  /** Whether the chat has a running or waiting task. */
+  isBusy(chatId: number): boolean
+}
+
 /**
  * Serialises message handling per chat so turns never overlap; commands bypass
- * the queue so `/stop` and `/reset` act on the turn that is running. A failing
- * handler is logged and never blocks the next one.
+ * the queue so `/stop` and `/reset` act on the turn that is running. Other
+ * work (idle engagement) shares the same queue through `enqueue`. A failing
+ * task is logged and never blocks the next one.
  */
-export function createDispatcher(deps: BotDeps): (message: TelegramMessage) => void {
+export function createDispatcher(deps: BotDeps): Dispatcher {
   const chains = new Map<number, Promise<void>>()
   const report = (message: TelegramMessage) => (error: unknown) => {
     deps.log.error(`dsh-telegram: message ${message.message_id} in chat ${message.chat.id} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
   }
-  return (message) => {
-    const chatId = message.chat.id
-    if (commandFrom(message, deps) !== undefined) {
-      void handleMessage(message, deps).catch(report(message))
-      return
-    }
+  const enqueue = (chatId: number, task: () => Promise<void>): void => {
     const previous = chains.get(chatId) ?? Promise.resolve()
     const next = previous
-      .then(() => handleMessage(message, deps))
-      .catch(report(message))
+      .then(task)
+      .catch((error: unknown) => {
+        deps.log.error(`dsh-telegram: queued task in chat ${chatId} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+      })
       .finally(() => {
         if (chains.get(chatId) === next) chains.delete(chatId)
       })
     chains.set(chatId, next)
+  }
+  return {
+    dispatch(message) {
+      if (commandFrom(message, deps) !== undefined) {
+        void handleMessage(message, deps).catch(report(message))
+        return
+      }
+      enqueue(message.chat.id, () => handleMessage(message, deps).catch(report(message)))
+    },
+    enqueue,
+    isBusy: chatId => chains.has(chatId),
   }
 }

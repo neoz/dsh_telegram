@@ -231,7 +231,7 @@ describe('handleMessage', () => {
         throw new Error('boom')
       })
       .mockImplementationOnce(async () => { order.push('b-start'); throw new Error('boom') })
-    const dispatch = createDispatcher(deps)
+    const { dispatch } = createDispatcher(deps)
     dispatch(msg({ text: 'one' }, 'private', 11))
     dispatch(msg({ text: 'two' }, 'private', 12))
     await new Promise(r => setTimeout(r, 5))
@@ -244,7 +244,7 @@ describe('handleMessage', () => {
   it('dispatcher runs /stop immediately while a turn is queued', async () => {
     let releaseFirst!: () => void
     agents.resolve.mockImplementationOnce(async () => { await new Promise<void>((r) => { releaseFirst = r }); throw new Error('boom') })
-    const dispatch = createDispatcher(deps)
+    const { dispatch } = createDispatcher(deps)
     dispatch(msg({ text: 'long task' }, 'private', 11))
     dispatch(msg({ text: '/stop' }, 'private', 12))
     await new Promise(r => setTimeout(r, 5))
@@ -256,12 +256,49 @@ describe('handleMessage', () => {
     let releaseFirst!: () => void
     agents.resolve.mockImplementationOnce(async () => { await new Promise<void>((r) => { releaseFirst = r }); throw new Error('boom') })
     const plain = { ...deps, config: Config({ botToken: 't', allowFrom: ['ann'], workspaceRoot: join(dir, 'ws'), dataDir: dir, model: 'm' }) }
-    const dispatch = createDispatcher(plain)
+    const { dispatch } = createDispatcher(plain)
     dispatch(msg({ text: 'long task' }, 'private', 11))
     dispatch(msg({ text: '/stop' }, 'private', 12))
     await new Promise(r => setTimeout(r, 5))
     expect(agents.stop).not.toHaveBeenCalled()
     expect(agents.resolve).toHaveBeenCalledTimes(1)
     releaseFirst()
+  })
+
+  it('notes a handled turn but not log-only messages or commands', async () => {
+    const noteTurn = vi.fn()
+    const withNote = { ...deps, noteTurn }
+    await handleMessage(msg({ text: 'hello' }, 'supergroup', 20), withNote)
+    expect(noteTurn).not.toHaveBeenCalled()
+    await handleMessage(msg({ text: '/help' }), withNote)
+    expect(noteTurn).not.toHaveBeenCalled()
+    await handleMessage(msg({ text: 'hello' }), withNote)
+    expect(noteTurn).toHaveBeenCalledWith(5)
+  })
+
+  it('enqueue runs after a queued message and isBusy tracks the queue', async () => {
+    let releaseFirst!: () => void
+    agents.resolve.mockImplementationOnce(async () => { await new Promise<void>((r) => { releaseFirst = r }); throw new Error('boom') })
+    const dispatcher = createDispatcher(deps)
+    expect(dispatcher.isBusy(5)).toBe(false)
+    dispatcher.dispatch(msg({ text: 'one' }, 'private', 11))
+    const order: string[] = []
+    dispatcher.enqueue(5, async () => { order.push('task') })
+    await new Promise(r => setTimeout(r, 5))
+    expect(dispatcher.isBusy(5)).toBe(true)
+    expect(order).toEqual([])
+    releaseFirst()
+    await new Promise(r => setTimeout(r, 5))
+    expect(order).toEqual(['task'])
+    expect(dispatcher.isBusy(5)).toBe(false)
+  })
+
+  it('a failing enqueued task does not block the next one', async () => {
+    const dispatcher = createDispatcher(deps)
+    const order: string[] = []
+    dispatcher.enqueue(5, async () => { throw new Error('boom') })
+    dispatcher.enqueue(5, async () => { order.push('second') })
+    await new Promise(r => setTimeout(r, 5))
+    expect(order).toEqual(['second'])
   })
 })
