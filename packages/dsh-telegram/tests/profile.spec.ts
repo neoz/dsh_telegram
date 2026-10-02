@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 
-/** The loader's `!!js` tag holds a JavaScript expression; keep it as source text here. */
-const schema = yaml.DEFAULT_SCHEMA.extend([new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: (source: string) => ({ js: source }) })])
+/** Mirrors the dsh loader (JSON schema plus `!!js`); the tag holds a JavaScript expression, kept as source text here. */
+const schema = yaml.JSON_SCHEMA.extend([new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: (source: string) => ({ js: source }) })])
 interface Row { id?: string; config?: Record<string, any>; insert?: Row[] }
 
 async function rows(path: string): Promise<Row[]> {
