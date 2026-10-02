@@ -48,7 +48,7 @@ The profile is baked into the image, so rebuild it afterwards (`docker compose -
 - Replies longer than the configured `messageSize` fold the remainder behind "Show more"; replies that do not fit one Telegram message are sent as a `.md` file.
 - The agent can send files from the chat workspace with `telegram_send_file` and read earlier chat messages with `telegram_chat_history`.
 - The container runs dsh with `DSH_PERMISSION_MODE=danger-full-access`; the container is the sandbox.
-- The agent never holds the DeepSeek key: `DEEPSEEK_BASE_URL` points it at the `bifrost` service ([Bifrost](https://github.com/maximhq/bifrost), config in `docker/bifrost/config.json`), which is the only container that receives `DEEPSEEK_API_KEY` and injects it upstream. The agent's own `DEEPSEEK_API_KEY` is a placeholder that Bifrost ignores. Models the agent may request are listed on the key in that config; the key also has `use_for_batch_api` enabled because Bifrost only serves the Files API (which dsh uses to upload images) through batch-enabled keys.
+- The agent never holds the DeepSeek key: `DEEPSEEK_BASE_URL` points it at the `llm-proxy` service (nginx, config in `docker/llm-proxy/default.conf.template`), which is the only container that receives `DEEPSEEK_API_KEY` and swaps it in for the agent's placeholder. The proxy forwards `/anthropic/` requests unchanged, because dsh references uploaded images by Files API id and a translating gateway (Bifrost) dropped those references.
 
 ## Web search
 

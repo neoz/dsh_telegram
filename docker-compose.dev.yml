@@ -14,17 +14,17 @@ services:
       DSH_LOG_LEVEL: ${DSH_LOG_LEVEL:-2}
       DSH_PERMISSION_MODE: danger-full-access
       SEARXNG_URL: http://searxng:8080
-      # The agent talks to DeepSeek through bifrost, which holds the real key; dsh still
-      # insists on a credential, so it gets a placeholder that Bifrost ignores.
-      DEEPSEEK_BASE_URL: http://bifrost:8080/anthropic
-      DEEPSEEK_API_KEY: bifrost
+      # The agent talks to DeepSeek through llm-proxy, which holds the real key; dsh still
+      # insists on a credential, so it gets a placeholder that the proxy replaces.
+      DEEPSEEK_BASE_URL: http://llm-proxy:8080/anthropic
+      DEEPSEEK_API_KEY: proxy
     volumes:
       - ./workspace:/workspace
       - ./data:/data
       - dsh-home:/dsh-home
     depends_on:
       - searxng
-      - bifrost
+      - llm-proxy
     restart: unless-stopped
 
   # Self-hosted metasearch behind web_search; not published outside the compose network.
@@ -35,20 +35,15 @@ services:
       SEARXNG_BASE_URL: http://searxng:8080/
     restart: unless-stopped
 
-  # LLM gateway that injects the DeepSeek key; the only service that receives it.
-  bifrost:
-    image: maximhq/bifrost:latest
+  # Pass-through proxy that injects the DeepSeek key; the only service that receives it.
+  # Not published outside the compose network.
+  llm-proxy:
+    image: nginx:alpine
     environment:
-      APP_HOST: 0.0.0.0
-      APP_PORT: 8080
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-    ports:
-      - "8080:8080"
     volumes:
-      - bifrost-data:/app/data
-      - ./docker/bifrost/config.json:/app/data/config.json
+      - ./docker/llm-proxy/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     restart: unless-stopped
 
 volumes:
   dsh-home:
-  bifrost-data:
