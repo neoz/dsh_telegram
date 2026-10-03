@@ -35,4 +35,12 @@ describe('profile patch', () => {
       expect(evalJs(config.enabled, {})).toBe(false)
     }
   })
+
+  it('tunes idle timing from replayed chat logs', async () => {
+    for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
+      const config = telegramIdle(await rows(path))
+      expect({ idleMinutes: config.idleMinutes, minNewMessages: config.minNewMessages, chance: config.chance })
+        .toEqual({ idleMinutes: 10, minNewMessages: 5, chance: 0.5 })
+    }
+  })
 })

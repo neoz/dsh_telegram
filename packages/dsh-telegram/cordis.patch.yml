@@ -39,3 +39,6 @@
         idle:
           enabled: !!js process.env.TELEGRAM_IDLE_ENABLED === 'true'
           chatIds: !!js (process.env.TELEGRAM_IDLE_CHATS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n !== 0)
+          idleMinutes: 10
+          minNewMessages: 5
+          chance: 0.5
