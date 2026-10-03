@@ -146,6 +146,10 @@ describe('idle prompt', () => {
       '</group_messages>',
     ].join('\n'))
   })
+  it('labels a sender without a username by name, so no number besides the message id appears', () => {
+    const { username: _, ...noUsername } = human(5, 3)
+    expect(idleTranscript([{ ...noUsername, user_id: 78886291, name: 'Merc' }], new Set([5]))).toContain('[5] (open) Merc: m5')
+  })
 })
 
 describe('parseDecision', () => {
@@ -160,6 +164,9 @@ describe('parseDecision', () => {
     expect(parseDecision('```json\n{"action":"skip"}\n```', entries, pickable)).toEqual({ kind: 'skip' })
     expect(parseDecision('Sure! {"action":"react","message_id":3,"emoji":"\u{2764}\u{FE0F}"} hope that helps', entries, pickable))
       .toEqual({ kind: 'react', messageId: 3, emoji: '\u{2764}' })
+  })
+  it('maps the face with tears of joy, which bots cannot react with, to the rolling-on-the-floor face', () => {
+    expect(parseDecision('{"action":"react","message_id":3,"emoji":"\u{1F602}"}', entries, pickable)).toEqual({ kind: 'react', messageId: 3, emoji: '\u{1F923}' })
   })
   it('truncates a long reply to 500 characters', () => {
     const action = parseDecision(JSON.stringify({ action: 'reply', message_id: 3, text: 'a'.repeat(600) }), entries, pickable)

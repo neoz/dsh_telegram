@@ -113,8 +113,13 @@ export function idleSystemPrompt(persona: string, model: string): string {
   ].join('\n')
 }
 
+/** Without a username, senderLabel shows `id:<user_id>`, which the model mistook for a message id. */
+function idleSender(entry: ChatLogEntry): string {
+  return entry.bot !== true && entry.username === undefined && entry.name !== '' ? oneLine(entry.name) : senderLabel(entry)
+}
+
 export function idleTranscript(entries: readonly ChatLogEntry[], pickable: ReadonlySet<number>): string {
-  const lines = entries.map(e => `[${e.message_id}] ${pickable.has(e.message_id) ? '(open) ' : ''}${senderLabel(e)}: ${oneLine(e.text)}`)
+  const lines = entries.map(e => `[${e.message_id}] ${pickable.has(e.message_id) ? '(open) ' : ''}${idleSender(e)}: ${oneLine(e.text)}`)
   return `<group_messages>\n${lines.join('\n')}\n</group_messages>`
 }
 
@@ -139,7 +144,9 @@ export function parseDecision(raw: string, entries: readonly ChatLogEntry[], pic
     throw new Error(`message_id ${String(messageId)} is not a message the bot may pick`)
   }
   if (action === 'react') {
-    const normalized = typeof emoji === 'string' ? emoji.replaceAll('\u{FE0F}', '') : ''
+    const stripped = typeof emoji === 'string' ? emoji.replaceAll('\u{FE0F}', '') : ''
+    // Models reach for the face with tears of joy, which Telegram does not offer bots as a reaction.
+    const normalized = stripped === '\u{1F602}' ? '\u{1F923}' : stripped
     if (!IDLE_EMOJI.includes(normalized)) throw new Error(`emoji ${String(emoji)} is not allowed`)
     return { kind: 'react', messageId: target.message_id, emoji: normalized }
   }
