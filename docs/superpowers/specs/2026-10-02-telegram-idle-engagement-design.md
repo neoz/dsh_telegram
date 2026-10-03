@@ -115,10 +115,15 @@ reply to an older message right before answering that user.
 `system` is static for a given config, so its prefix caches:
 
 - `idle.persona` (or the default).
-- Rules: you are reading a group chat; speak only when you have something
-  genuinely worth adding; when unsure, choose `skip`; prefer a reaction over a
-  reply; only pick a message marked `(open)`, the others are context; a reply
-  is plain text (no markdown), one or two short sentences.
+- Rules: you are reading a group chat; join in like a regular member; prefer a
+  reply whenever you have something witty or useful to say, otherwise react;
+  when unsure, choose `skip`; only pick a message marked `(open)`, the others
+  are context, and `message_id` is the number in square brackets; a reply is
+  plain text (no markdown), one or two short sentences, never crude even when
+  others are; a reaction uses an allowed emoji. Replaying 30 past moments per
+  prompt against the production model, the earlier "prefer a reaction" rule
+  gave 1 reply in 30 and two invalid picks; this one gave 20 replies, 5
+  reactions, 5 skips and none invalid on a holdout set.
 - The allowed emoji list.
 - The output contract: a single JSON object
   `{"action":"react"|"reply"|"skip","message_id":number,"emoji":string,"text":string}`.
