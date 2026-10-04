@@ -1,4 +1,4 @@
-# dsh-telegram bundle layer: console logging, persona for a chat assistant, and the bot row.
+# dsh-telegram bundle layer: console logging, persona for a chat assistant, the bot row and idle engagement.
 - id: system-prompt
   config:
     personaPrefix: >-
@@ -36,9 +36,12 @@
         dataDir: !!js process.env.DSH_TELEGRAM_DATA ?? '/data'
         model: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
         superAdmins: !!js (process.env.TELEGRAM_SUPER_ADMINS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0)
-        idle:
-          enabled: !!js process.env.TELEGRAM_IDLE_ENABLED === 'true'
-          chatIds: !!js (process.env.TELEGRAM_IDLE_CHATS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n !== 0)
-          idleMinutes: 10
-          minNewMessages: 5
-          chance: 0.5
+
+    - id: telegram-idle
+      name: dsh-telegram/idle
+      config:
+        enabled: !!js process.env.TELEGRAM_IDLE_ENABLED === 'true'
+        chatIds: !!js (process.env.TELEGRAM_IDLE_CHATS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n !== 0)
+        idleMinutes: 10
+        minNewMessages: 5
+        chance: 0.5

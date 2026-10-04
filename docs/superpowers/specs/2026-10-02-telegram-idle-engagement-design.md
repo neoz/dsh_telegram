@@ -3,6 +3,9 @@
 Date: 2026-10-02
 Status: approved design, pending implementation plan
 
+Wiring and configuration have since moved to the `dsh-telegram/idle` plugin;
+see `2026-10-04-telegram-idle-plugin-design.md`.
+
 ## Goal
 
 Make the bot feel alive in groups where people keep chatting but nobody has
