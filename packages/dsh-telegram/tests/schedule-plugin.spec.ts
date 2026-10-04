@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatLog } from '../src/chatlog.ts'
+import { buildRecord } from '../src/schedule.ts'
 import * as schedulePlugin from '../src/schedule-plugin.ts'
 import { Config } from '../src/schedule-plugin.ts'
 import type { TelegramService } from '../src/service.ts'
@@ -36,6 +37,13 @@ function service(): TelegramService {
   }
 }
 
+/** Collects every log line, errors included, as text. */
+function capture(): string[] {
+  const lines: string[] = []
+  root.logger.exporter({ levels: { default: 3 }, export: message => lines.push(message.args.map(String).join(' ')) })
+  return lines
+}
+
 describe('schedule Config', () => {
   it('fills defaults', () => {
     expect(Config({})).toEqual({ timeZone: 'Asia/Ho_Chi_Minh', maxPerChat: 20 })
@@ -63,12 +71,32 @@ describe('schedule plugin', () => {
     await vi.waitFor(() => expect(disposed).toHaveLength(4))
   })
 
-  it('does not start on a corrupted schedule.json and leaves it untouched', async () => {
+  it('does not start on a corrupted schedule.json, leaves it untouched and names it in the error', async () => {
+    const lines = capture()
     await writeFile(join(dir, 'schedule.json'), '{broken')
     root.plugin(schedulePlugin, Config({}))
     root.provide('telegram', service())
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(registered).toEqual([])
     expect(await readFile(join(dir, 'schedule.json'), 'utf8')).toBe('{broken')
+    expect(lines.some(line => line.includes(join(dir, 'schedule.json')))).toBe(true)
+  })
+
+  it('logs once that reminders are on, with the count', async () => {
+    const lines = capture()
+    root.plugin(schedulePlugin, Config({}))
+    root.provide('telegram', service())
+    await vi.waitFor(() => expect(registered).toHaveLength(4))
+    expect(lines.filter(line => line === 'dsh-telegram: reminders on (0 active)')).toHaveLength(1)
+  })
+
+  it('names the next target when reminders are stored', async () => {
+    const record = buildRecord('r1', 'T', 'p', { after_seconds: 3600 }, Date.now(), 'UTC')
+    await writeFile(join(dir, 'schedule.json'), JSON.stringify({ version: 1, reminders: [{ chatId: 5, creator: { id: 7, name: '@ann' }, mode: 'message', record }] }))
+    const lines = capture()
+    root.plugin(schedulePlugin, Config({}))
+    root.provide('telegram', service())
+    await vi.waitFor(() => expect(registered).toHaveLength(4))
+    expect(lines).toContain(`dsh-telegram: reminders on (1 active, next ${record.scheduledAt})`)
   })
 })

@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
+import { nextDueAt } from './schedule.ts'
 import { startScheduler } from './schedule-delivery.ts'
 import { ReminderStore } from './schedule-store.ts'
 import { createScheduleTools } from './schedule-tools.ts'
@@ -42,6 +43,9 @@ export function apply(ctx: Context, config: ScheduleConfig): void {
     const store = new ReminderStore(join(ctx.telegram.dataDir, 'schedule.json'))
     // A corrupted file throws here: this fiber fails and the file stays as it was.
     store.load()
+    const reminders = store.all()
+    const next = nextDueAt(reminders)
+    log.info(`dsh-telegram: reminders on (${reminders.length} active${next === undefined ? '' : `, next ${new Date(next).toISOString()}`})`)
     const scheduler = startScheduler({ store, telegram: ctx.telegram, log })
     ctx.effect(() => () => {
       scheduler.stop()
