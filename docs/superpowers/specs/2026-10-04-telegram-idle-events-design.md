@@ -133,7 +133,9 @@ The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
 
 - `start` lists the new config fields.
 - `check` is recorded for every verdict except `not_hot`, and only when it
-  differs from the chat's `lastVerdict` in the current burst. A record has
+  differs from the chat's `lastVerdict` in the current burst, except `go`
+  and `chance_miss`, which are recorded every time because each one is a
+  slot's roll. A record has
   `{ ts, chatId, event: "check", verdict, fresh, speakers, pickable, burstSince, slotsUsed }`.
   `busy` records carry only `verdict`.
 - `decision` is unchanged (`react`, `reply`, `skip`, `cancelled`, `error`).

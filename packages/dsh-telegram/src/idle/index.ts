@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
-import { startIdle, type IdleEvent } from './engage.ts'
+import { startIdle, type IdleEvent } from './scheduler.ts'
 import type {} from '../service.ts'
 
 /** Unprompted engagement in active groups; see the idle engagement spec. */
@@ -19,7 +19,6 @@ export interface IdleConfig {
   readonly burstGapMinutes: number
   /** Engagements allowed per burst; each slot rolls `chance` once. */
   readonly maxPerBurst: number
-  readonly checkIntervalMinutes: number
   readonly maxPerDay: number
   readonly quietHours: { readonly from: number; readonly to: number }
   readonly timezone: string
@@ -36,7 +35,6 @@ const DEFAULT_IDLE: IdleConfig = {
   hotWindowMinutes: 5,
   burstGapMinutes: 15,
   maxPerBurst: 1,
-  checkIntervalMinutes: 10,
   maxPerDay: 5,
   quietHours: { from: 23, to: 7 },
   timezone: 'Asia/Ho_Chi_Minh',
@@ -53,7 +51,6 @@ export const Config: z<IdleConfig> = z.object({
   hotWindowMinutes: z.number().min(1).default(DEFAULT_IDLE.hotWindowMinutes),
   burstGapMinutes: z.number().min(1).default(DEFAULT_IDLE.burstGapMinutes),
   maxPerBurst: z.number().min(1).default(DEFAULT_IDLE.maxPerBurst),
-  checkIntervalMinutes: z.number().min(1).default(DEFAULT_IDLE.checkIntervalMinutes),
   maxPerDay: z.number().min(1).default(DEFAULT_IDLE.maxPerDay),
   quietHours: z.object({
     from: z.number().min(0).max(23).default(DEFAULT_IDLE.quietHours.from),
@@ -88,8 +85,7 @@ export function apply(ctx: Context, config: IdleConfig): void {
     // Appends run one after another so lines keep their order; a failed write only warns.
     let writing = Promise.resolve()
     const record = (event: IdleEvent): void => {
-      writing = writing.then(() => appendFile(file, `${JSON.stringify(event)}
-`, 'utf8')).catch((error: unknown) => {
+      writing = writing.then(() => appendFile(file, JSON.stringify(event) + '\n', 'utf8')).catch((error: unknown) => {
         logger.warn(`dsh-telegram: writing ${file} failed: ${error instanceof Error ? error.message : String(error)}`)
       })
     }
@@ -108,6 +104,7 @@ export function apply(ctx: Context, config: IdleConfig): void {
       record,
     })
     ctx.on('telegram/turn', chatId => handle.noteTurn(chatId))
+    ctx.on('telegram/message', (chatId, entry) => handle.observe(chatId, entry))
     ctx.effect(() => () => handle.stop(), 'dsh-telegram: idle scheduler')
   })
 }

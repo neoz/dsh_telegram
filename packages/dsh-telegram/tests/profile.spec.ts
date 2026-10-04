@@ -64,4 +64,16 @@ describe('profile patch', () => {
     expect(reminders.name).toBe('dsh-telegram/schedule')
     expect(reminders.config).toEqual({ timeZone: 'Asia/Ho_Chi_Minh', maxPerChat: 20 })
   })
+
+  it('keeps both idle rows valid for the burst schema', async () => {
+    const { Config } = await import('../src/idle/index.ts')
+    const resolve = (value: any): any => (value !== null && typeof value === 'object' && 'js' in value
+      ? evalJs(value, { TELEGRAM_IDLE_ENABLED: 'true', TELEGRAM_IDLE_CHATS: '-100' })
+      : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolve(v)])) : value)
+    for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
+      const config = Config(resolve(telegramIdle(await rows(path))))
+      expect(config).toMatchObject({ enabled: true, chatIds: [-100], hotWindowMinutes: 5, burstGapMinutes: 15, maxPerBurst: 1 })
+      expect(config).not.toHaveProperty('checkIntervalMinutes')
+    }
+  })
 })

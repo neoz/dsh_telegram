@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatLog } from '../../src/chatlog.ts'
 import * as idlePlugin from '../../src/idle/index.ts'
@@ -21,7 +21,6 @@ describe('idle Config', () => {
       hotWindowMinutes: 5,
       burstGapMinutes: 15,
       maxPerBurst: 1,
-      checkIntervalMinutes: 10,
       maxPerDay: 5,
       quietHours: { from: 23, to: 7 },
       timezone: 'Asia/Ho_Chi_Minh',
@@ -53,66 +52,61 @@ const FAILED = 3
 
 describe('idle plugin', () => {
   const A = -5
-  const B = -6
-  /** Engages on every tick once a chat has a fresh human message: no quiet hours, chance 1. */
-  const config = Config({
-    enabled: true, chatIds: [A, B], idleMinutes: 1, minNewMessages: 1, chance: 1,
-    checkIntervalMinutes: 1, quietHours: { from: 0, to: 0 },
-  })
+  const config = Config({ enabled: true, chatIds: [A], idleMinutes: 1, minNewMessages: 5, chance: 1, quietHours: { from: 0, to: 0 } })
   let dir: string
-  let chatLog: ChatLog
-  let queued: Array<{ chatId: number; task: () => Promise<void> }>
-  let calls: GenerateOptions[]
   let root: Context
-  let baseline: number
+  let chatLog: ChatLog
+  let queued: number[]
 
   function service(): TelegramService {
     return {
-      api: new FakeTelegramApi(),
-      chatLog,
-      queue: { enqueue: (chatId, task) => { queued.push({ chatId, task }) }, isBusy: () => false },
-      bot: { id: 1, username: 'dshbot' },
-      selection: { provider: 'p', model: 'm' },
-      dataDir: dir,
-    } as TelegramService
+      api: new FakeTelegramApi(), chatLog,
+      queue: { enqueue: (chatId) => { queued.push(chatId) }, isBusy: () => false },
+      bot: { id: 1, username: 'dshbot' }, selection: { provider: 'p', model: 'm' }, dataDir: dir,
+      superAdmins: [], chatOf: () => undefined, turnOf: () => undefined, prompt: () => {},
+    }
+  }
+  async function burst(): Promise<void> {
+    const now = Date.now()
+    for (let i = 0; i < 5; i++) {
+      await chatLog.append(A, { ts: new Date(now - (5 - i) * 1000).toISOString(), message_id: 10 + i, user_id: i % 2 === 0 ? 7 : 8, name: 'U', text: 'hi' })
+    }
   }
 
   beforeEach(async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     dir = await mkdtemp(join(tmpdir(), 'idle-plugin-'))
-    chatLog = new ChatLog(join(dir, 'log'))
-    const ts = new Date(Date.now() - 30_000).toISOString()
-    for (const [chatId, id] of [[A, 10], [B, 20]] as const) {
-      await chatLog.append(chatId, { ts, message_id: id, user_id: 7, username: 'ann', name: 'Ann', text: 'hi' })
-    }
     queued = []
-    calls = []
     root = new Context()
-    root.provide('llm', {
-      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-        calls.push(options)
-        yield { type: 'text-delta', index: 0, text: '{"action":"skip"}' }
-        yield { type: 'finish', reason: { kind: 'stop' } } as never
-      },
+    // The core wires the chat log to telegram/message the same way.
+    chatLog = new ChatLog(join(dir, 'log'), (chatId, entry) => root.emit('telegram/message', chatId, entry))
+    root.provide('llm', { async *stream(): AsyncIterable<StreamChunk> { yield { type: 'finish', reason: { kind: 'stop' } } as never } })
+  })
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
+
+  async function started(): Promise<() => void> {
+    root.plugin(idlePlugin, config)
+    const revoke = root.provide('telegram', service())
+    await vi.waitFor(async () => {
+      expect((await readFile(join(dir, 'idle-decisions.jsonl'), 'utf8'))).toContain('"event":"start"')
     })
-    baseline = vi.getTimerCount()
-  })
-  afterEach(async () => {
-    vi.useRealTimers()
-    await rm(dir, { recursive: true, force: true })
-  })
+    // Let the window seeding finish before messages arrive.
+    await new Promise(resolve => setTimeout(resolve, 20))
+    return revoke
+  }
 
   it('stays inert without the telegram service', async () => {
     root.plugin(idlePlugin, config)
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(vi.getTimerCount()).toBe(baseline)
+    await burst()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(queued).toEqual([])
   })
 
-  it('loads but starts no timer when disabled', async () => {
+  it('loads but does nothing when disabled', async () => {
     const fiber = root.plugin(idlePlugin, { ...config, enabled: false })
     root.provide('telegram', service())
     await vi.waitFor(() => expect(fiber.state).toBe(ACTIVE))
-    expect(vi.getTimerCount()).toBe(baseline)
+    await burst()
+    expect(queued).toEqual([])
   })
 
   it('rejects an invalid config at load, before the bot provides telegram', async () => {
@@ -121,44 +115,38 @@ describe('idle plugin', () => {
     await vi.waitFor(() => expect([badZone.state, badChance.state]).toEqual([FAILED, FAILED]))
   })
 
+  it('queues an engagement when lines written through telegram.chatLog make a burst hot', async () => {
+    await started()
+    await burst()
+    expect(queued).toEqual([A])
+  })
+
+  it('a turn noted through telegram/turn keeps the bot from joining', async () => {
+    await started()
+    root.emit('telegram/turn', A)
+    await burst()
+    expect(queued).toEqual([])
+  })
+
+  it('stops listening on revoke and starts again on a new provide', async () => {
+    const revoke = await started()
+    revoke()
+    await burst()
+    expect(queued).toEqual([])
+    root.provide('telegram', service())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const now = Date.now()
+    for (let i = 0; i < 5; i++) {
+      await chatLog.append(A, { ts: new Date(now + i).toISOString(), message_id: 50 + i, user_id: i % 2 === 0 ? 7 : 8, name: 'U', text: 'again' })
+    }
+    expect(queued).toEqual([A])
+  })
+
   it('logs once that idle engagement is on', async () => {
     const lines: string[] = []
     root.logger.exporter({ levels: { default: 3 }, export: message => lines.push(String(message.args[0])) })
-    root.plugin(idlePlugin, config)
-    root.provide('telegram', service())
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline + 1))
-    expect(lines.filter(line => line.includes('idle engagement on for 2 chat(s)'))).toHaveLength(1)
-  })
-
-  it('starts the scheduler once telegram is provided and skips a chat that just had a turn', async () => {
-    root.plugin(idlePlugin, config)
-    root.provide('telegram', service())
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline + 1))
-    root.emit('telegram/turn', A)
-    await vi.advanceTimersByTimeAsync(60_000)
-    await vi.waitFor(() => expect(queued.map(q => q.chatId)).toContain(B))
-    expect(queued.map(q => q.chatId)).toEqual([B])
-  })
-
-  it('stops on revoke, so a task queued before it never calls the model', async () => {
-    root.plugin(idlePlugin, config)
-    const revoke = root.provide('telegram', service())
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline + 1))
-    await vi.advanceTimersByTimeAsync(60_000)
-    await vi.waitFor(() => expect(queued).toHaveLength(2))
-    revoke()
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline))
-    for (const { task } of queued) await task()
-    expect(calls).toHaveLength(0)
-  })
-
-  it('appends its events to idle-decisions.jsonl in the data dir', async () => {
-    root.plugin(idlePlugin, config)
-    root.provide('telegram', service())
-    await vi.waitFor(async () => {
-      const lines = (await readFile(join(dir, 'idle-decisions.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-      expect(lines[0]).toMatchObject({ event: 'start', chatIds: [A, B] })
-    })
+    await started()
+    expect(lines.filter(line => line.includes('idle engagement on for 1 chat(s)'))).toHaveLength(1)
   })
 
   it('only warns when the decision log cannot be written', async () => {
@@ -168,16 +156,8 @@ describe('idle plugin', () => {
     root.plugin(idlePlugin, config)
     root.provide('telegram', { ...service(), dataDir: join(dir, 'blocker') })
     await vi.waitFor(() => expect(warnings.some(w => w.includes('idle-decisions.jsonl'))).toBe(true))
-    expect(vi.getTimerCount()).toBe(baseline + 1)
-  })
-
-  it('restarts after a revoke and a new provide', async () => {
-    root.plugin(idlePlugin, config)
-    const revoke = root.provide('telegram', service())
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline + 1))
-    revoke()
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline))
-    root.provide('telegram', service())
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline + 1))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await burst()
+    expect(queued).toEqual([A])
   })
 })
