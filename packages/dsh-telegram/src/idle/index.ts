@@ -13,6 +13,12 @@ export interface IdleConfig {
   readonly idleMinutes: number
   readonly minNewMessages: number
   readonly chance: number
+  /** Window for a hot burst and for messages the bot may pick. */
+  readonly hotWindowMinutes: number
+  /** Human silence longer than this ends a burst. */
+  readonly burstGapMinutes: number
+  /** Engagements allowed per burst; each slot rolls `chance` once. */
+  readonly maxPerBurst: number
   readonly checkIntervalMinutes: number
   readonly maxPerDay: number
   readonly quietHours: { readonly from: number; readonly to: number }
@@ -27,6 +33,9 @@ const DEFAULT_IDLE: IdleConfig = {
   idleMinutes: 60,
   minNewMessages: 5,
   chance: 0.3,
+  hotWindowMinutes: 5,
+  burstGapMinutes: 15,
+  maxPerBurst: 1,
   checkIntervalMinutes: 10,
   maxPerDay: 5,
   quietHours: { from: 23, to: 7 },
@@ -41,6 +50,9 @@ export const Config: z<IdleConfig> = z.object({
   idleMinutes: z.number().min(1).default(DEFAULT_IDLE.idleMinutes),
   minNewMessages: z.number().min(1).default(DEFAULT_IDLE.minNewMessages),
   chance: z.number().min(0).max(1).default(DEFAULT_IDLE.chance),
+  hotWindowMinutes: z.number().min(1).default(DEFAULT_IDLE.hotWindowMinutes),
+  burstGapMinutes: z.number().min(1).default(DEFAULT_IDLE.burstGapMinutes),
+  maxPerBurst: z.number().min(1).default(DEFAULT_IDLE.maxPerBurst),
   checkIntervalMinutes: z.number().min(1).default(DEFAULT_IDLE.checkIntervalMinutes),
   maxPerDay: z.number().min(1).default(DEFAULT_IDLE.maxPerDay),
   quietHours: z.object({
