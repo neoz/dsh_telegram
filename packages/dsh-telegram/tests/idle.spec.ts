@@ -4,15 +4,14 @@ import { join } from 'node:path'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatLog, type ChatLogEntry } from '../src/chatlog.ts'
-import { Config, type IdleConfig } from '../src/config.ts'
+import { Config, type IdleConfig } from '../src/idle-plugin.ts'
 import {
   answeredIds, dayKey, decide, emptyIdleState, hourIn, IDLE_EMOJI, idleSystemPrompt, idleTranscript, parseDecision, pickableIds, shouldEngage, startIdle,
   type IdleDeps, type IdleState,
 } from '../src/idle.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
 
-const minimal = { botToken: 't', allowFrom: ['ann'], workspaceRoot: '/ws', dataDir: '/data', model: 'm' }
-const base: IdleConfig = Config({ ...minimal, idle: { enabled: true, chatIds: [-5] } }).idle
+const base: IdleConfig = Config({ enabled: true, chatIds: [-5] })
 /** 12:00 in Asia/Ho_Chi_Minh (UTC+7). */
 const NOON = Date.parse('2026-10-02T05:00:00Z')
 const MIN = 60_000

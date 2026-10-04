@@ -3,7 +3,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-attachment'
-import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
 import { autoRetry } from '@grammyjs/auto-retry'
 import { run, type RunnerHandle } from '@grammyjs/runner'
@@ -11,10 +10,10 @@ import { Bot } from 'grammy'
 import { createDispatcher } from './bot.ts'
 import { ChatLog } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
-import { startIdle, type IdleHandle } from './idle.ts'
 import type { TelegramMessage } from './inbound.ts'
 import { MemoryStore } from './memory.ts'
 import { sweepOldFiles } from './retention.ts'
+import type { TelegramService } from './service.ts'
 import { SessionMap } from './session-map.ts'
 import { ChatAgents } from './sessions.ts'
 import { createGrammyApi } from './telegram-api.ts'
@@ -23,13 +22,14 @@ import type { SessionEventFeed } from './turn.ts'
 
 export { Config } from './config.ts'
 export type { Config as TelegramConfig } from './config.ts'
+export type { TelegramService } from './service.ts'
 
 /** Cordis plugin name. */
 export const name = 'dsh-telegram'
 /** Services required before the bot starts. */
-export const inject = ['agents', 'tools', 'attachments', 'loader', 'llm']
+export const inject = ['agents', 'tools', 'attachments', 'loader']
 
-interface Started { polling: Polling; agents: ChatAgents; idle: IdleHandle | undefined }
+interface Started { polling: Polling; agents: ChatAgents; service: TelegramService }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -79,7 +79,6 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     log,
   })
 
-  let idle: IdleHandle | undefined
   const dispatcher = createDispatcher({
     api,
     config,
@@ -91,26 +90,24 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     botId: bot.botInfo.id,
     botUsername: bot.botInfo.username,
     log,
-    noteTurn: chatId => idle?.noteTurn(chatId),
+    noteTurn: chatId => ctx.emit('telegram/turn', chatId),
   })
   bot.on('message', (update) => { dispatcher.dispatch(update.message as unknown as TelegramMessage) })
   bot.catch((error) => { log.error(`dsh-telegram: update handler failed: ${String(error.error)}`) })
 
   const polling = startPolling(bot, config, log)
   log.info(`dsh-telegram: polling as @${bot.botInfo.username}`)
-  idle = startIdle({
-    config: config.idle,
-    provider: config.provider,
-    model: config.model,
-    llm: ctx.llm,
-    api,
-    chatLog,
-    queue: dispatcher,
-    botId: bot.botInfo.id,
-    botUsername: bot.botInfo.username,
-    log,
-  })
-  return { polling, agents, idle }
+  return {
+    polling,
+    agents,
+    service: {
+      api,
+      chatLog,
+      queue: dispatcher,
+      bot: { id: bot.botInfo.id, username: bot.botInfo.username },
+      selection: { provider: config.provider, model: config.model },
+    },
+  }
 }
 
 interface Polling { stop(): Promise<void> }
@@ -164,24 +161,28 @@ export function apply(ctx: Context, config: Config): void {
     return () => clearInterval(timer)
   }, 'dsh-telegram: file retention')
   let started: Started | undefined
+  let revoke: (() => void) | undefined
   let stopped = false
   ctx.effect(() => {
     void start(ctx, config).then((result) => {
       if (stopped) {
-        result.idle?.stop()
         void result.polling.stop().then(() => result.agents.disposeAll())
         return
       }
       started = result
+      // Provided only now: Cordis starts dependants as soon as a name is provided, with or without a value.
+      revoke = ctx.provide('telegram', result.service)
     }).catch((error: unknown) => {
       log.error(`dsh-telegram: failed to start: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
     })
     return () => {
       stopped = true
       if (started === undefined) return
-      const { polling, agents, idle } = started
+      const { polling, agents } = started
       started = undefined
-      idle?.stop()
+      // Dependants stop first, while the bot can still serve their last calls.
+      revoke?.()
+      revoke = undefined
       void polling.stop().then(() => agents.disposeAll())
     }
   }, 'dsh-telegram: bot runner')

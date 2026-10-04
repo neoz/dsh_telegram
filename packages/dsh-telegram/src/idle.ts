@@ -1,6 +1,6 @@
 import { ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
-import type { IdleConfig } from './config.ts'
+import type { IdleConfig } from './idle-plugin.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
 /**
