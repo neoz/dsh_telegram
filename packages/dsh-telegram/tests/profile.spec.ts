@@ -58,4 +58,10 @@ describe('profile patch', () => {
     expect(clock.name).toBe('@deepseek-ai/dsh-time-context')
     expect(clock.config).toEqual({ timeZone: 'Asia/Ho_Chi_Minh' })
   })
+
+  it('mounts the reminder plugin with the local zone', async () => {
+    const reminders = row(await rows('../cordis.patch.yml'), 'telegram-schedule')
+    expect(reminders.name).toBe('dsh-telegram/schedule')
+    expect(reminders.config).toEqual({ timeZone: 'Asia/Ho_Chi_Minh', maxPerChat: 20 })
+  })
 })

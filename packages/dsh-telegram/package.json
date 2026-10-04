@@ -79,6 +79,10 @@
       "types": "./lib/idle-plugin.d.ts",
       "default": "./lib/idle-plugin.js"
     },
+    "./schedule": {
+      "types": "./lib/schedule-plugin.d.ts",
+      "default": "./lib/schedule-plugin.js"
+    },
     "./package.json": "./package.json"
   }
 }
