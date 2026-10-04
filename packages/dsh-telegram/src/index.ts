@@ -54,7 +54,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   await bot.init()
   const api = createGrammyApi(bot, config.botToken)
 
-  const chatLog = new ChatLog(join(config.dataDir, 'chatlog'))
+  const chatLog = new ChatLog(join(config.dataDir, 'chatlog'), (chatId, entry) => ctx.emit('telegram/message', chatId, entry))
   const memory = new MemoryStore(join(config.dataDir, 'memory'), config.memory)
   const map = new SessionMap(join(config.dataDir, 'telegram-sessions.json'))
   await map.load()

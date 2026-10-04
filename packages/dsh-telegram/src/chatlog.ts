@@ -31,9 +31,9 @@ export function formatEntry(entry: ChatLogEntry): string {
   return `[${entry.ts}] ${senderLabel(entry)}: ${oneLine(entry.text)}${media}`
 }
 
-/** Append-only per-chat JSONL log under `dir`. */
+/** Append-only per-chat JSONL log under `dir`; `onAppend` hears every line once it is written. */
 export class ChatLog {
-  constructor(private readonly dir: string) {}
+  constructor(private readonly dir: string, private readonly onAppend?: (chatId: number, entry: ChatLogEntry) => void) {}
 
   private file(chatId: number): string {
     return join(this.dir, `${chatId}.jsonl`)
@@ -42,6 +42,7 @@ export class ChatLog {
   async append(chatId: number, entry: ChatLogEntry): Promise<void> {
     await mkdir(this.dir, { recursive: true })
     await appendFile(this.file(chatId), `${JSON.stringify(entry)}\n`, 'utf8')
+    this.onAppend?.(chatId, entry)
   }
 
   async readAll(chatId: number): Promise<ChatLogEntry[]> {

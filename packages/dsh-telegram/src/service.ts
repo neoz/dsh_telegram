@@ -1,5 +1,5 @@
 import type { Dispatcher, PromptInput } from './bot.ts'
-import type { ChatLog } from './chatlog.ts'
+import type { ChatLog, ChatLogEntry } from './chatlog.ts'
 import type { TurnContext } from './sessions.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
@@ -29,5 +29,7 @@ declare module '@deepseek-ai/cordis' {
   interface Events {
     /** A message in this chat passed the gate and is about to get a turn. */
     'telegram/turn'(chatId: number): void
+    /** A line was appended to a chat's log (human or bot), after it was written. */
+    'telegram/message'(chatId: number, entry: ChatLogEntry): void
   }
 }

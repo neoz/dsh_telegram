@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -13,6 +13,17 @@ function entry(id: number, text: string, extra: Partial<ChatLogEntry> = {}): Cha
 }
 
 describe('ChatLog', () => {
+  it('calls onAppend after a write, and not after a failed one', async () => {
+    const seen: Array<[number, string]> = []
+    const log = new ChatLog(dir, (chatId, e) => seen.push([chatId, e.text]))
+    await log.append(5, entry(1, 'hi'))
+    expect(seen).toEqual([[5, 'hi']])
+    await writeFile(join(dir, 'blocker'), 'x')
+    const broken = new ChatLog(join(dir, 'blocker', 'log'), () => seen.push([0, 'never']))
+    await expect(broken.append(5, entry(2, 'lost'))).rejects.toThrow()
+    expect(seen).toEqual([[5, 'hi']])
+  })
+
   it('appends one JSON line per entry', async () => {
     const log = new ChatLog(dir)
     await log.append(5, entry(1, 'hi'))
