@@ -23,7 +23,7 @@ caps and log lines stay as they are.
 |---|---|
 | Packaging | Same npm package, new sub-export `dsh-telegram/idle`, like `dsh-telegram/logger`. No new package. |
 | Coupling | The core provides a `telegram` service and emits `telegram/turn`; the idle plugin injects `telegram` and `llm`. |
-| Lifecycle | Cordis starts the idle plugin when both services have a value and disposes it when `telegram` goes back to `undefined`. |
+| Lifecycle | The core provides `telegram` only once the bot is running and revokes it on stop. Cordis starts the idle plugin when both services are provided and disposes it on revoke. |
 | Toggle | `enabled` stays a config field of the idle plugin, so `TELEGRAM_IDLE_ENABLED` keeps its meaning. The row's `disabled` is not used. |
 | Environment | `TELEGRAM_IDLE_ENABLED` and `TELEGRAM_IDLE_CHATS` unchanged. |
 
@@ -50,11 +50,13 @@ declare module '@deepseek-ai/cordis' {
 
 ## Core: `src/index.ts`
 
-- `apply` calls `ctx.provide('telegram')` with no value.
-- When `start()` has finished (bot initialised, dispatcher created, polling
-  started) it calls `ctx.set('telegram', { api, chatLog, queue: dispatcher, bot, selection })`.
-- On stop it calls `ctx.set('telegram', undefined)` before polling stops, so
-  dependants are disposed while the bot is still usable.
+- `start()` returns the service value (`{ api, chatLog, queue: dispatcher, bot, selection }`)
+  in `Started.service`.
+- Once `start()` has resolved and the plugin is not stopping, the bot runner
+  effect calls `revoke = ctx.provide('telegram', started.service)`. A start
+  that resolves after stop provides nothing.
+- On stop the effect calls `revoke()` before polling stops, so dependants are
+  disposed while the bot is still usable.
 - The dispatcher's `noteTurn` is wired to `chatId => ctx.emit('telegram/turn', chatId)`.
   `src/bot.ts` does not change.
 - Everything idle is removed: the `startIdle` import, `Started.idle`,
@@ -119,17 +121,18 @@ Unchanged: `docker-compose.yml`, `docker-compose.dev.yml`, `.env.example`,
 The earlier idle design gets a note at the top pointing to this spec for
 wiring and configuration.
 
-## Risk to verify first
+## Cordis behaviour this relies on
 
-Two Cordis 4 behaviours this design relies on:
+Checked with a probe against `@deepseek-ai/cordis` 4.0.4 while planning:
 
-- A plugin that injects `telegram` is disposed when the service is set back to
-  `undefined`, and started again when it gets a value.
-- `ctx.set('telegram', ...)` works from `start()`, which runs inside a
-  `ctx.effect` of the fiber that called `ctx.provide`.
+- `inject` waits for a name to be provided, not for a value: after
+  `ctx.provide('telegram')` with no value, a dependant starts at once with
+  `ctx.telegram === undefined`. So the core must not provide the name before
+  the bot is running, and `ctx.set` is not used.
+- `ctx.provide(name, value)` called asynchronously from inside an effect starts
+  waiting dependants; calling the returned function disposes them.
 
-The plugin test below checks both before the rest is built. If the second one
-fails, `provide` and `set` move into the bot runner effect.
+`tests/idle-plugin.spec.ts` pins the second point.
 
 ## Testing (vitest)
 
@@ -138,8 +141,8 @@ fails, `provide` and `set` move into the bot runner effect.
     log line when `enabled`);
   - `ctx.emit('telegram/turn', chatId)` records the turn (the next tick does
     not engage that chat);
-  - `ctx.set('telegram', undefined)` stops the scheduler (timer cleared,
-    pending task aborted);
+  - revoking `telegram` stops the scheduler (timer cleared, pending task
+    aborted);
   - an invalid `timezone` is rejected.
 - `tests/config.spec.ts`: the four idle tests (defaults, partial overrides,
   chance above 1, unknown timezone) move to the idle plugin schema; the core
@@ -147,7 +150,8 @@ fails, `provide` and `set` move into the bot runner effect.
 - `tests/profile.spec.ts`: reads the `telegram-idle` row instead of
   `telegram.config.idle`; asserts the `telegram` row in both patches has no
   `idle`.
-- `tests/idle.spec.ts`, `tests/bot.spec.ts`: unchanged.
+- `tests/idle.spec.ts`: only its `IdleConfig` import and the `base` config
+  change to the idle plugin schema. `tests/bot.spec.ts`: unchanged.
 
 ## Out of scope
 
