@@ -78,6 +78,18 @@ describe('evaluate', () => {
   })
 })
 
+describe('slot spacing', () => {
+  it('waits idleMinutes between slots even when the first one missed', () => {
+    const config = { ...base, maxPerBurst: 2 }
+    const state = stateWith(hot(), config)
+    expect(evaluate(state, NOW, config, () => 0.9).verdict).toBe('chance_miss')
+    expect(evaluate(state, NOW + 0.1 * MIN, config, hit).verdict).toBe('not_idle')
+    const later = NOW + 11 * MIN
+    for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) observe(state, human(20 + i, m, i % 2 === 0 ? 7 : 8, later), config)
+    expect(evaluate(state, later, config, hit).verdict).toBe('go')
+  })
+})
+
 describe('observe', () => {
   it('starts a new burst after burstGapMinutes of silence, resetting slots and the last verdict', () => {
     const state = stateWith(hot())
@@ -85,7 +97,7 @@ describe('observe', () => {
     state.lastVerdict = 'burst_spent'
     const next = human(30, -16, 8)
     observe(state, next, base)
-    expect(state.burst).toEqual({ since: Date.parse(next.ts), lastHumanAt: Date.parse(next.ts), slotsUsed: 0 })
+    expect(state.burst).toEqual({ since: Date.parse(next.ts), lastHumanAt: Date.parse(next.ts), slotsUsed: 0, lastSlotAt: 0 })
     expect(state.lastVerdict).toBeUndefined()
   })
 

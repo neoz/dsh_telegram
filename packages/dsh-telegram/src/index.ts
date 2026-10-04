@@ -8,7 +8,7 @@ import { autoRetry } from '@grammyjs/auto-retry'
 import { run, type RunnerHandle } from '@grammyjs/runner'
 import { Bot } from 'grammy'
 import { createDispatcher } from './bot.ts'
-import { ChatLog } from './chatlog.ts'
+import { ChatLog, type ChatLogEntry } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
 import type { TelegramMessage } from './inbound.ts'
 import { MemoryStore } from './memory.ts'
@@ -54,7 +54,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   await bot.init()
   const api = createGrammyApi(bot, config.botToken)
 
-  const chatLog = new ChatLog(join(config.dataDir, 'chatlog'), (chatId, entry) => ctx.emit('telegram/message', chatId, entry))
+  const chatLog = new ChatLog(join(config.dataDir, 'chatlog'), forwardAppends((chatId, entry) => ctx.emit('telegram/message', chatId, entry), log.warn))
   const memory = new MemoryStore(join(config.dataDir, 'memory'), config.memory)
   const map = new SessionMap(join(config.dataDir, 'telegram-sessions.json'))
   await map.load()
@@ -112,6 +112,17 @@ async function start(ctx: Context, config: Config): Promise<Started> {
       turnOf: chatId => agents.turnOf(chatId),
       prompt: (chatId, input) => dispatcher.prompt(chatId, input),
     },
+  }
+}
+
+/** Chat-log listener that forwards lines as telegram/message; Cordis does not isolate listeners, so a throw only warns. */
+export function forwardAppends(emit: (chatId: number, entry: ChatLogEntry) => void, warn: (msg: string) => void): (chatId: number, entry: ChatLogEntry) => void {
+  return (chatId, entry) => {
+    try {
+      emit(chatId, entry)
+    } catch (error) {
+      warn(`dsh-telegram: a telegram/message listener failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 }
 

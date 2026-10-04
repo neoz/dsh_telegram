@@ -12,7 +12,7 @@ export type IdleEvent = { ts: string } & (
 )
 type IdleEventBody = IdleEvent extends infer E ? E extends IdleEvent ? Omit<E, 'ts'> : never : never
 
-export interface IdleQueue { enqueue(chatId: number, task: () => Promise<void>): void; isBusy(chatId: number): boolean }
+export interface IdleQueue { enqueue(chatId: number, task: () => Promise<void>): void }
 
 export interface IdleDeps {
   config: IdleConfig
@@ -137,11 +137,11 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     }
   }
 
+  /**
+   * Runs inside the dispatcher task that wrote the line, so the chat's queue is always busy here: the engagement is
+   * simply enqueued behind it, and the in-queue re-check cancels it if a turn started meanwhile.
+   */
   const consider = (chatId: number, state: ChatIdleState): void => {
-    if (deps.queue.isBusy(chatId)) {
-      check(chatId, state, 'busy')
-      return
-    }
     const result = evaluate(state, now(), config, random)
     if (result.verdict !== 'not_hot') check(chatId, state, result.verdict, result)
     if (result.verdict !== 'go') return

@@ -51,8 +51,13 @@ interface Events {
 }
 ```
 
-Listeners run synchronously through `ctx.emit`. Cordis catches a throwing
-listener, so a listener failure never breaks the write. Code that builds a
+Listeners run synchronously through `ctx.emit`. Cordis 4.0.4 does not isolate
+listeners, so the core wraps the emit (`forwardAppends` in `src/index.ts`): a
+throwing listener only logs a warning and never fails the write.
+
+There is no `busy` verdict: human lines are written by a dispatcher task, so the
+chat's queue is always busy when the event fires. The engagement is enqueued
+behind that task, and the in-queue re-check cancels it if a turn started. Code that builds a
 `ChatLog` without a listener behaves as before.
 
 ## Idle: per-chat state
@@ -92,11 +97,11 @@ On `telegram/message` for an allowlisted chat:
 
 | Verdict | Blocks when |
 |---|---|
-| `busy` | The chat's dispatcher queue has a running or waiting task. |
 | `not_hot` | Fewer than `minNewMessages` human messages in the last `hotWindowMinutes`. |
 | `one_speaker` | Enough messages, but from a single sender. |
 | `not_idle` | Bot activity within the last `idleMinutes`: the newest bot entry, `lastEngagedAt`, or `lastTurnAt`. |
 | `burst_spent` | `burst.slotsUsed >= maxPerBurst`. |
+| `not_idle` (slot spacing) | A later slot rolled within `idleMinutes` of the previous roll, whether that one engaged, missed or was skipped. |
 | `nothing_pickable` | No human message in the last `hotWindowMinutes` that the bot has not answered (`handled`, or the `reply_to` of a bot entry) or reacted to. |
 | `daily_cap` | `maxPerDay` engagements today, by calendar day in `timezone`. |
 | `quiet_hours` | The current hour in `timezone` is in `[quietHours.from, quietHours.to)`. |
@@ -137,7 +142,6 @@ The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
   and `chance_miss`, which are recorded every time because each one is a
   slot's roll. A record has
   `{ ts, chatId, event: "check", verdict, fresh, speakers, pickable, burstSince, slotsUsed }`.
-  `busy` records carry only `verdict`.
 - `decision` is unchanged (`react`, `reply`, `skip`, `cancelled`, `error`).
 
 ## Error handling

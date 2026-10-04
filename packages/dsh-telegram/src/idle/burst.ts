@@ -5,13 +5,14 @@ const MINUTE_MS = 60_000
 /** A conversation needs at least two people; one person talking to themselves is not hot. */
 const MIN_SPEAKERS = 2
 
-export type CheckVerdict = 'go' | 'busy' | 'not_hot' | 'one_speaker' | 'not_idle' | 'burst_spent' | 'nothing_pickable' | 'daily_cap' | 'quiet_hours' | 'chance_miss'
+export type CheckVerdict = 'go' | 'not_hot' | 'one_speaker' | 'not_idle' | 'burst_spent' | 'nothing_pickable' | 'daily_cap' | 'quiet_hours' | 'chance_miss'
 
 /** Per-chat idle state fed by chat-log lines; times are epoch milliseconds, `day` is the local `dayKey`. */
 export interface ChatIdleState {
   /** Recent lines, oldest first: the retention window, never fewer than the newest `contextMessages`. */
   recent: ChatLogEntry[]
-  burst: { since: number; lastHumanAt: number; slotsUsed: number }
+  /** `lastSlotAt` is when the last slot was rolled, so a second slot waits `idleMinutes` even after a miss. */
+  burst: { since: number; lastHumanAt: number; slotsUsed: number; lastSlotAt: number }
   lastEngagedAt: number
   lastTurnAt: number
   day: string
@@ -25,7 +26,7 @@ export interface ChatIdleState {
 export interface Evaluation { verdict: CheckVerdict; fresh: number; speakers: number; pickable: ReadonlySet<number> }
 
 export function emptyChatState(): ChatIdleState {
-  return { recent: [], burst: { since: 0, lastHumanAt: 0, slotsUsed: 0 }, lastEngagedAt: 0, lastTurnAt: 0, day: '', count: 0, reacted: [], lastVerdict: undefined }
+  return { recent: [], burst: { since: 0, lastHumanAt: 0, slotsUsed: 0, lastSlotAt: 0 }, lastEngagedAt: 0, lastTurnAt: 0, day: '', count: 0, reacted: [], lastVerdict: undefined }
 }
 
 export function dayKey(now: number, timezone: string): string {
@@ -62,7 +63,7 @@ export function observe(state: ChatIdleState, entry: ChatLogEntry, config: IdleC
   if (drop > 0) state.recent.splice(0, drop)
   if (entry.bot === true) return
   if (at - state.burst.lastHumanAt > config.burstGapMinutes * MINUTE_MS) {
-    state.burst = { since: at, lastHumanAt: at, slotsUsed: 0 }
+    state.burst = { since: at, lastHumanAt: at, slotsUsed: 0, lastSlotAt: 0 }
     state.lastVerdict = undefined
   } else {
     state.burst.lastHumanAt = at
@@ -88,13 +89,17 @@ export function evaluate(state: ChatIdleState, now: number, config: IdleConfig, 
   const result = (verdict: CheckVerdict): Evaluation => ({ verdict, fresh, speakers, pickable })
   if (fresh < config.minNewMessages) return result('not_hot')
   if (speakers < MIN_SPEAKERS) return result('one_speaker')
-  if (now - lastBotActivity(state) <= config.idleMinutes * MINUTE_MS) return result('not_idle')
+  const idle = config.idleMinutes * MINUTE_MS
+  if (now - lastBotActivity(state) <= idle) return result('not_idle')
   if (roll && state.burst.slotsUsed >= config.maxPerBurst) return result('burst_spent')
+  // A later slot also waits idleMinutes after the previous roll, whether it engaged, missed or was skipped.
+  if (roll && state.burst.slotsUsed > 0 && now - state.burst.lastSlotAt <= idle) return result('not_idle')
   if (pickable.size === 0) return result('nothing_pickable')
   const today = state.day === dayKey(now, config.timezone) ? state.count : 0
   if (today >= config.maxPerDay) return result('daily_cap')
   if (inQuietHours(hourIn(now, config.timezone), config.quietHours)) return result('quiet_hours')
   if (!roll) return result('go')
   state.burst.slotsUsed++
+  state.burst.lastSlotAt = now
   return result(random() < config.chance ? 'go' : 'chance_miss')
 }

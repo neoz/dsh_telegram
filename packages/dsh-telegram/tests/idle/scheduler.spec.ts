@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createDispatcher } from '../../src/bot.ts'
 import { ChatLog, type ChatLogEntry } from '../../src/chatlog.ts'
 import { Config } from '../../src/idle/index.ts'
 import { startIdle, type IdleDeps, type IdleEvent, type IdleHandle } from '../../src/idle/scheduler.ts'
@@ -70,6 +71,25 @@ const checks = () => events.filter(e => e.event === 'check').map(e => (e as { ve
 const decisions = () => events.filter(e => e.event === 'decision').map(({ ts: _ts, chatId: _chat, event: _event, ...rest }) => rest)
 
 describe('startIdle', () => {
+  it('engages when the lines arrive from inside the real dispatcher queue, as they do in production', async () => {
+    // Every human line is written by a dispatcher task, so the chat's queue is busy while telegram/message fires.
+    const dispatcher = createDispatcher({ log: { info: () => {}, warn: () => {}, error: () => {} } } as never)
+    const idle = start(undefined, { queue: dispatcher })
+    await idle.ready
+    for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) dispatcher.enqueue(CHAT, () => say(idle, human(i + 1, m)))
+    await vi.waitFor(() => expect(decisions()).toEqual([{ action: 'reply', messageId: 5, text: 'hehe' }]))
+    idle.stop()
+  })
+
+  it('a bot line never triggers a check', async () => {
+    const idle = start()
+    await idle.ready
+    for (const [i, m] of [4, 3, 2, 1].entries()) await say(idle, human(i + 1, m))
+    await say(idle, { ...human(9, 0.5), user_id: 1, bot: true })
+    idle.stop()
+    expect(checks()).toEqual([])
+  })
+
   it('enqueues as soon as a burst gets hot, with no timer, and replies', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'setTimeout'] })
     const idle = start()
@@ -91,16 +111,6 @@ describe('startIdle', () => {
     idle.stop()
     expect(events[0]).toMatchObject({ event: 'start', chatIds: [CHAT], config: { hotWindowMinutes: 5, burstGapMinutes: 15, maxPerBurst: 1 } })
     expect(events[0]).not.toHaveProperty('config.persona')
-  })
-
-  it('records a busy chat and enqueues nothing', async () => {
-    const idle = start()
-    await idle.ready
-    busy.add(CHAT)
-    for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) await say(idle, human(i + 1, m))
-    idle.stop()
-    expect(tasks).toHaveLength(0)
-    expect(checks()).toEqual(['busy'])
   })
 
   it('does not repeat a check while the verdict stays the same', async () => {
