@@ -37,7 +37,6 @@ describe('evaluate', () => {
   it('names the first condition that blocks', () => {
     expect(evaluate(stateWith(hot().slice(0, 4)), NOW, base, hit).verdict).toBe('not_hot')
     expect(evaluate(stateWith(hot().map(e => ({ ...e, user_id: 7 }))), NOW, base, hit).verdict).toBe('one_speaker')
-    expect(evaluate(stateWith([...hot(), bot(9, 3)]), NOW, base, hit).verdict).toBe('not_idle')
     const turned = stateWith(hot())
     turned.lastTurnAt = NOW - MIN
     expect(evaluate(turned, NOW, base, hit).verdict).toBe('not_idle')
@@ -47,6 +46,10 @@ describe('evaluate', () => {
     capped.count = base.maxPerDay
     expect(evaluate(capped, NOW, base, hit).verdict).toBe('daily_cap')
     expect(evaluate(stateWith(hot(NIGHT)), NIGHT, base, hit).verdict).toBe('quiet_hours')
+  })
+
+  it('counts only being called as activity, not the recent lines the bot sent itself', () => {
+    expect(evaluate(stateWith([...hot(), bot(9, 1, 5)]), NOW, base, hit).verdict).toBe('go')
   })
 
   it('rolls chance once per slot: a miss spends the slot', () => {
@@ -70,9 +73,6 @@ describe('evaluate', () => {
     // The burst continues: the gap from the last message stays under burstGapMinutes.
     for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) observe(state, human(20 + i, m, i % 2 === 0 ? 7 : 8, later), config)
     expect(state.burst.slotsUsed).toBe(1)
-    state.lastEngagedAt = NOW + 2 * MIN
-    expect(evaluate(state, later, config, hit).verdict).toBe('not_idle')
-    state.lastEngagedAt = NOW
     expect(evaluate(state, later, config, hit).verdict).toBe('go')
     expect(evaluate(state, later, config, hit).verdict).toBe('burst_spent')
   })
@@ -141,7 +141,6 @@ describe('helpers', () => {
   })
   it('never offers a message answered or already reacted to', () => {
     const state = stateWith([human(2, 4, 7), bot(3, 3.5, 2), human(4, 3, 8), human(5, 2, 7), human(6, 1, 8), human(7, 0.5, 7)])
-    state.lastEngagedAt = 0
     state.reacted = [5]
     expect([...evaluate(state, NOW, { ...base, idleMinutes: 1 }, hit, false).pickable]).toEqual([4, 6, 7])
   })

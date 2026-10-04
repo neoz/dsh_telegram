@@ -23,7 +23,7 @@ a configuration choice (`maxPerBurst`).
 | Trigger | A new core event, `telegram/message`, fired for every line appended to a chat log. Idle evaluates on each human message. The interval timer goes away. |
 | Hot | At least `minNewMessages` human messages in the last `hotWindowMinutes`, from at least two different senders. Two is fixed, not configurable. |
 | Burst | A run of human messages with no gap longer than `burstGapMinutes`; a longer gap starts a new burst. |
-| Slots | `maxPerBurst` engagements per burst (default 1). A second slot also needs `idleMinutes` of bot silence. |
+| Slots | `maxPerBurst` engagements per burst (default 1). A second slot also waits `idleMinutes` after the previous roll. |
 | Chance | Rolled once per slot. Hit or miss, the roll uses the slot; a slot leads to at most one LLM call, and an LLM `skip` uses it too. |
 | State | Kept in memory per allowlisted chat. Seeded from the chat log once at start, then fed by events. |
 | Unchanged | `maxPerDay`, quiet hours, the LLM prompt and output validation, the in-queue re-check, delivery, `telegram/turn`. |
@@ -67,7 +67,6 @@ interface ChatIdleState {
   /** Entries of the last max(hotWindowMinutes, burstGapMinutes, idleMinutes) minutes, and never fewer than the newest contextMessages entries; oldest first. */
   recent: ChatLogEntry[]
   burst: { since: number; lastHumanAt: number; slotsUsed: number }
-  lastEngagedAt: number
   lastTurnAt: number
   day: string
   count: number
@@ -92,8 +91,8 @@ On `telegram/message` for an allowlisted chat:
 
 1. Append the entry to `recent` and drop entries older than the retention
    window, keeping at least the newest `contextMessages` entries so the LLM
-   gets as much context as today. Bot entries stop here: they only feed `not_idle` and the
-   answered-message set.
+   gets as much context as today. Bot entries stop here: they only feed the answered-message
+   set and the LLM context.
 2. For a human entry, if its time is more than `burstGapMinutes` after
    `burst.lastHumanAt`, start a new burst
    (`since = now, slotsUsed = 0, lastVerdict = undefined`). Then set
@@ -104,7 +103,7 @@ On `telegram/message` for an allowlisted chat:
 |---|---|
 | `not_hot` | Fewer than `minNewMessages` human messages in the last `hotWindowMinutes`. |
 | `one_speaker` | Enough messages, but from a single sender. |
-| `not_idle` | Bot activity within the last `idleMinutes`: the newest bot entry, `lastEngagedAt`, or `lastTurnAt`. |
+| `not_idle` | Someone addressed the bot within the last `idleMinutes` (`lastTurnAt`). The bot's own replies, idle reactions and reminder messages do not count. |
 | `burst_spent` | `burst.slotsUsed >= maxPerBurst`. |
 | `not_idle` (slot spacing) | A later slot rolled within `idleMinutes` of the previous roll, whether that one engaged, missed or was skipped. |
 | `nothing_pickable` | No human message in the last `hotWindowMinutes` that the bot has not answered (`handled`, or the `reply_to` of a bot entry) or reacted to. |
@@ -117,8 +116,8 @@ On `telegram/message` for an allowlisted chat:
    slot. If anything now blocks (for example the bot was addressed meanwhile),
    record `cancelled` and stop. Otherwise call the LLM with the newest
    `contextMessages` entries of `recent`, with pickable messages marked
-   `(open)`, and deliver exactly as today. A `react` or `reply` sets
-   `lastEngagedAt`, counts toward `maxPerDay`, and records the reaction.
+   `(open)`, and deliver exactly as today. A `react` or `reply` counts
+   toward `maxPerDay`, and a reaction is remembered so it is not picked again.
 
 The evaluation is a pure function of the state, `now`, the config and `random`,
 so it is tested without timers.
@@ -132,7 +131,7 @@ so it is tested without timers.
 | `maxPerBurst` | 1 | New, min 1. |
 | `chance` | 0.3 | Now per slot. The bundle and profile keep 0.5. |
 | `checkIntervalMinutes` | removed | No timer. |
-| `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is also the minimum gap between two slots of one burst. |
+| `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is how long nobody must have addressed the bot, and also the minimum gap between two slots of one burst. |
 
 The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
 `chance: 0.5`) stay valid and need no change.
@@ -187,6 +186,12 @@ The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
   (which emits `telegram/message`) leads to a queued task.
 - Profile: the bundle and profile idle rows still validate against the new
   schema.
+
+## Known effects
+
+- Idle means only that nobody addressed the bot for `idleMinutes`. After the
+  bot sends a `message` reminder into a hot group, it may join that
+  conversation right away.
 
 ## Out of scope
 

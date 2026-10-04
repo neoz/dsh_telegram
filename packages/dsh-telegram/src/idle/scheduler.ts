@@ -114,7 +114,6 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     const day = dayKey(at, config.timezone)
     state.count = state.day === day ? state.count + 1 : 1
     state.day = day
-    state.lastEngagedAt = at
     try {
       if (action.kind === 'react') {
         state.reacted = [...state.reacted, action.messageId].slice(-MAX_REACTED)

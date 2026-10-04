@@ -16,7 +16,7 @@ export interface ChatIdleState {
   recent: Array<{ entry: ChatLogEntry; at: number }>
   /** `lastSlotAt` is when the last slot was rolled, so a second slot waits `idleMinutes` even after a miss. */
   burst: { since: number; lastHumanAt: number; slotsUsed: number; lastSlotAt: number }
-  lastEngagedAt: number
+  /** When someone last addressed the bot here; the bot is idle once this is `idleMinutes` old. */
   lastTurnAt: number
   day: string
   count: number
@@ -29,7 +29,7 @@ export interface ChatIdleState {
 export interface Evaluation { verdict: CheckVerdict; fresh: number; speakers: number; pickable: ReadonlySet<number> }
 
 export function emptyChatState(): ChatIdleState {
-  return { recent: [], burst: { since: 0, lastHumanAt: 0, slotsUsed: 0, lastSlotAt: 0 }, lastEngagedAt: 0, lastTurnAt: 0, day: '', count: 0, reacted: [], lastVerdict: undefined }
+  return { recent: [], burst: { since: 0, lastHumanAt: 0, slotsUsed: 0, lastSlotAt: 0 }, lastTurnAt: 0, day: '', count: 0, reacted: [], lastVerdict: undefined }
 }
 
 export function dayKey(now: number, timezone: string): string {
@@ -74,11 +74,6 @@ export function observe(state: ChatIdleState, entry: ChatLogEntry, config: IdleC
   }
 }
 
-function lastBotActivity(state: ChatIdleState): number {
-  const lastBot = state.recent.findLast(e => e.entry.bot === true)
-  return Math.max(lastBot === undefined ? 0 : lastBot.at, state.lastEngagedAt, state.lastTurnAt)
-}
-
 /**
  * The first condition that blocks, else a chance roll that uses the burst's next slot (so this mutates `state`).
  * With `roll` false (the in-queue re-check) it neither needs a free slot nor rolls.
@@ -94,7 +89,8 @@ export function evaluate(state: ChatIdleState, now: number, config: IdleConfig, 
   if (fresh < config.minNewMessages) return result('not_hot')
   if (speakers < MIN_SPEAKERS) return result('one_speaker')
   const idle = config.idleMinutes * MINUTE_MS
-  if (now - lastBotActivity(state) <= idle) return result('not_idle')
+  // Idle means nobody addressed the bot for idleMinutes; its own replies, reactions and reminders do not count.
+  if (now - state.lastTurnAt <= idle) return result('not_idle')
   if (roll && state.burst.slotsUsed >= config.maxPerBurst) return result('burst_spent')
   // A later slot also waits idleMinutes after the previous roll, whether it engaged, missed or was skipped.
   if (roll && state.burst.slotsUsed > 0 && now - state.burst.lastSlotAt <= idle) return result('not_idle')

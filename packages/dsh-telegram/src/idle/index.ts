@@ -10,6 +10,7 @@ import type {} from '../service.ts'
 export interface IdleConfig {
   readonly enabled: boolean
   readonly chatIds: number[]
+  /** The bot is idle once nobody has addressed it for this long; also the minimum gap between two slots of a burst. */
   readonly idleMinutes: number
   readonly minNewMessages: number
   readonly chance: number
