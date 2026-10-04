@@ -82,6 +82,47 @@ describe('handleMessage', () => {
   })
   afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 
+  it('prompt queues a turn with no message to quote, react to or mark', async () => {
+    const notes: number[] = []
+    deps.noteTurn = chatId => notes.push(chatId)
+    const dispatcher = createDispatcher(deps)
+    dispatcher.prompt(5, { text: 'remind me', sender: ann })
+    await vi.waitFor(() => expect(dispatcher.isBusy(5)).toBe(false))
+    expect((followups[0] as { content: unknown[] }).content).toEqual([{ type: 'text', text: 'remind me' }])
+    expect(agents.setTurn).toHaveBeenCalledWith(5, { sender: ann, isGroup: false })
+    expect(api.callsTo('setReaction')).toHaveLength(0)
+    expect(agents.markTurn).not.toHaveBeenCalled()
+    expect(api.callsTo('sendMessage')[0]!.args[2]).not.toHaveProperty('replyTo')
+    expect(notes).toEqual([5])
+  })
+
+  it('prompt in a group adds no group block and counts as a group turn', async () => {
+    await deps.chatLog.append(-100, { ts: 't', message_id: 8, user_id: 9, name: 'Bob', text: 'earlier note' })
+    const dispatcher = createDispatcher(deps)
+    dispatcher.prompt(-100, { text: 'remind me', sender: ann })
+    await vi.waitFor(() => expect(dispatcher.isBusy(-100)).toBe(false))
+    expect((followups[0] as { content: Array<{ text: string }> }).content[0]!.text).toBe('remind me')
+    expect(agents.setTurn).toHaveBeenCalledWith(-100, { sender: ann, isGroup: true })
+  })
+
+  it('prompt waits behind a running message turn', async () => {
+    const order: string[] = []
+    let release!: () => void
+    agents.resolve.mockImplementationOnce(async () => {
+      order.push('message')
+      await new Promise<void>((resolve) => { release = resolve })
+      return { agent: (await agents.resolve.getMockImplementation()!()).agent, resumed: false }
+    })
+    const dispatcher = createDispatcher(deps)
+    dispatcher.dispatch(msg({ text: 'hello' }))
+    dispatcher.prompt(5, { text: 'remind me', sender: ann })
+    await vi.waitFor(() => expect(order).toEqual(['message']))
+    expect(followups).toHaveLength(0)
+    release()
+    await vi.waitFor(() => expect(dispatcher.isBusy(5)).toBe(false))
+    expect(followups).toHaveLength(2)
+  })
+
   it('ignores strangers in DMs without logging', async () => {
     await handleMessage(msg({ text: 'hi', from: bob }), deps)
     expect(api.calls).toHaveLength(0)

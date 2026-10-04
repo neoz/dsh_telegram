@@ -34,6 +34,8 @@ Its pure domain helpers are reused instead.
 `TelegramService` (`src/service.ts`) gains:
 
 ```ts
+/** Where plugins keep their own durable files. */
+dataDir: string
 superAdmins: readonly number[]
 /** Chat owning a live agent; undefined for subagents and unknown sessions. */
 chatOf(agentId: string): number | undefined
@@ -65,6 +67,7 @@ Files:
   `Config`, `apply`. `apply` validates the config at load (same pattern as the
   idle plugin), then `ctx.inject(['telegram', 'tools'], ...)` starts the store,
   the timer and the tools.
+- `src/schedule-delivery.ts`: the timer and delivery of due reminders.
 - `src/schedule-store.ts`: loads and saves `schedule.json`. Every operation
   runs through one FIFO queue; a save writes a temp file and renames it.
 - `src/schedule.ts`: pure logic: building records from tool input, permission
@@ -111,7 +114,8 @@ resolves the chat with `telegram.chatOf(exec.agent.id)` and the sender with
   `after_seconds`, `at`, `every_seconds` (at least 60), `daily`
   (`{ time, time_zone? }`), `weekly` (`{ time, time_zone?, weekdays }`),
   `cron` (`{ expression, time_zone? }`). A missing `time_zone` uses
-  `config.timeZone`. `at` takes the `dsh-schedule` `AtInput`.
+  `config.timeZone`. `at` is an ISO 8601 instant with an offset (for example
+  `2026-10-05T08:00:00+07:00`).
 - `schedule_list`: the chat's reminders.
 - `schedule_update`: `id` plus any of `title`, `prompt`, and one timing
   selector except `after_seconds`; a timing change re-anchors from now.
@@ -125,7 +129,7 @@ Results are JSON text. A reminder view has `id`, `kind`, `mode`, `title`,
 
 | Code | When |
 |---|---|
-| `invalid_rule` | A `dsh-schedule` input error (bad time, zone, weekday, cron field, interval below 60 s, `at` not in the future), zero or several selectors, blank title or prompt. |
+| `invalid_rule`, `invalid_time_zone`, `frequency_too_high`, `invalid_prompt` | Passed through from `dsh-schedule`'s `ScheduleInputError` (bad time, cron field or `at`; unknown zone; interval below 60 s; blank or over-long title or prompt). `invalid_rule` also covers zero or several selectors. |
 | `forbidden` | Update or delete by someone other than the creator or a super admin; `agent` mode by a non super admin. |
 | `schedule_not_found` | No reminder with that id in this chat (another chat's reminder counts as missing). |
 | `limit_reached` | The chat already has `maxPerChat` reminders. |

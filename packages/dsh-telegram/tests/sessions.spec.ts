@@ -55,6 +55,15 @@ async function build(failResume = false) {
 }
 
 describe('ChatAgents', () => {
+  it('maps a live agent id back to its chat', async () => {
+    const { agents } = await build()
+    const { agent } = await agents.resolve(1)
+    expect(agents.chatOf(String(agent.id))).toBe(1)
+    expect(agents.chatOf('telegram-unknown')).toBeUndefined()
+    await agents.reset(1)
+    expect(agents.chatOf(String(agent.id))).toBeUndefined()
+  })
+
   it('creates a session and workspace on first contact and stores the map entry', async () => {
     const { agents, registry, map, setup } = await build()
     const { agent, resumed } = await agents.resolve(1)

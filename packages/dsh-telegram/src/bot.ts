@@ -6,7 +6,7 @@ import { hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, type Teleg
 import { renderMemoryBlock, type MemoryStore } from './memory.ts'
 import type { ChatAgents } from './sessions.ts'
 import type { TelegramApi } from './telegram-api.ts'
-import { runTurn, type SessionEventFeed } from './turn.ts'
+import { runTurn, type SessionEventFeed, type TurnResult } from './turn.ts'
 
 /** Reaction placed on every message the agent will answer. */
 export const ACK_REACTION = '\u{1F47E}'
@@ -84,6 +84,94 @@ async function memoryBlock(deps: BotDeps, chatId: number): Promise<string | unde
   }
 }
 
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+
+/** A turn to run in a chat; `messageId` is the Telegram message it answers (quoted, given group context, marked), absent for a prompt. */
+export interface ChatTurnInput {
+  chatId: number
+  sender: TelegramUser
+  isGroup: boolean
+  text: string
+  images: Parameters<ImageStore['saveImages']>[0]
+  messageId?: number
+  startedAt: number
+}
+
+/** Resolves the chat's agent, runs one turn and logs the reply; shared by messages and prompts. */
+export async function runChatTurn(deps: BotDeps, input: ChatTurnInput): Promise<{ result: TurnResult; prepMs: number }> {
+  const { chatId, messageId } = input
+  const resolved = await deps.agents.resolve(chatId)
+  if (resolved.resumeFailed !== undefined) {
+    await deps.api.sendMessage(chatId, 'The previous conversation could not be restored; starting a new one.')
+  }
+
+  deps.agents.setTurn(chatId, { sender: input.sender, isGroup: input.isGroup })
+
+  let text = input.text
+  if (input.isGroup && messageId !== undefined) {
+    const recent = await deps.chatLog.recent(chatId, deps.agents.lastTurnMessageId(chatId), messageId, deps.config.recentMessagesLimit)
+    if (recent.length > 0) text = `${recentBlock(recent)}
+
+${text}`
+  }
+  // The memory block goes in front of the first user message of a session; later turns rely on memory_recall.
+  const sessionId = resolved.agent.id
+  const memoryText = deps.agents.memoryInjected(chatId, sessionId) ? '' : await memoryBlock(deps, chatId)
+  if (memoryText !== undefined && memoryText !== '') text = `${memoryText}
+
+${text}`
+  if (messageId !== undefined) await deps.agents.markTurn(chatId, messageId)
+
+  const content: ContentBlock[] = [{ type: 'text', text }]
+  if (input.images.length > 0) {
+    const refs = await deps.attachments.saveImages(input.images)
+    for (const ref of refs) content.push({ type: 'image', attachment: ref as never })
+  }
+
+  const prepMs = Date.now() - input.startedAt
+  if (memoryText !== undefined) deps.agents.markMemoryInjected(chatId, sessionId)
+  const workspaceDir = deps.agents.workspaceFor(chatId)
+  const result = await runTurn({
+    api: deps.api,
+    agent: resolved.agent,
+    feed: deps.feed,
+    chatId,
+    ...(messageId === undefined ? {} : { replyToMessageId: messageId }),
+    content,
+    outboxDir: join(workspaceDir, 'outbox'),
+    messageSize: deps.config.messageSize,
+    statusEditIntervalMs: deps.config.statusEditIntervalMs,
+    turnTimeoutMs: deps.config.turnTimeoutMs,
+    status: deps.config.status,
+    log: deps.log,
+  })
+
+  if (result.text !== '') {
+    await deps.chatLog.append(chatId, {
+      ts: new Date().toISOString(),
+      message_id: result.sentMessageId ?? 0,
+      user_id: deps.botId,
+      name: deps.botUsername,
+      text: result.text,
+      ...(messageId === undefined ? {} : { reply_to: messageId }),
+      bot: true,
+    })
+  }
+  return { result, prepMs }
+}
+
+export interface PromptInput { text: string; sender: TelegramUser }
+
+/** A turn nobody typed (a scheduled reminder): nothing to quote, react to or mark. */
+export async function promptTurn(deps: BotDeps, chatId: number, input: PromptInput): Promise<void> {
+  deps.noteTurn?.(chatId)
+  const { result, prepMs } = await runChatTurn(deps, {
+    chatId, sender: input.sender, isGroup: chatId < 0, text: input.text, images: [], startedAt: Date.now(),
+  })
+  deps.log.info(`dsh-telegram: chat ${chatId} prompt -> ${result.outcome}`
+    + ` (prep ${seconds(prepMs)}, agent ${seconds(result.timing.agentMs)}, deliver ${seconds(result.timing.deliverMs)})`)
+}
+
 export async function handleMessage(message: TelegramMessage, deps: BotDeps): Promise<void> {
   const verdict = gate(message, { allowFrom: deps.config.allowFrom, botId: deps.botId, botUsername: deps.botUsername })
   if (verdict === 'ignore') return
@@ -124,59 +212,15 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   await deps.chatLog.append(chatId, { ...inbound.logEntry, handled: true })
   await deps.api.setReaction(chatId, message.message_id, ACK_REACTION)
 
-  const resolved = await deps.agents.resolve(chatId)
-  if (resolved.resumeFailed !== undefined) {
-    await deps.api.sendMessage(chatId, 'The previous conversation could not be restored; starting a new one.')
-  }
-
-  deps.agents.setTurn(chatId, { sender: inbound.sender, isGroup: inbound.isGroup })
-
-  let text = inbound.text
-  if (inbound.isGroup) {
-    const recent = await deps.chatLog.recent(chatId, deps.agents.lastTurnMessageId(chatId), message.message_id, deps.config.recentMessagesLimit)
-    if (recent.length > 0) text = `${recentBlock(recent)}\n\n${text}`
-  }
-  // The memory block goes in front of the first user message of a session; later turns rely on memory_recall.
-  const sessionId = resolved.agent.id
-  const memoryText = deps.agents.memoryInjected(chatId, sessionId) ? '' : await memoryBlock(deps, chatId)
-  if (memoryText !== undefined && memoryText !== '') text = `${memoryText}\n\n${text}`
-  await deps.agents.markTurn(chatId, message.message_id)
-
-  const content: ContentBlock[] = [{ type: 'text', text }]
-  if (inbound.images.length > 0) {
-    const refs = await deps.attachments.saveImages(inbound.images)
-    for (const ref of refs) content.push({ type: 'image', attachment: ref as never })
-  }
-
-  const prepMs = Date.now() - receivedAt
-  if (memoryText !== undefined) deps.agents.markMemoryInjected(chatId, sessionId)
-  const result = await runTurn({
-    api: deps.api,
-    agent: resolved.agent,
-    feed: deps.feed,
+  const { result, prepMs } = await runChatTurn(deps, {
     chatId,
-    replyToMessageId: message.message_id,
-    content,
-    outboxDir: join(workspaceDir, 'outbox'),
-    messageSize: deps.config.messageSize,
-    statusEditIntervalMs: deps.config.statusEditIntervalMs,
-    turnTimeoutMs: deps.config.turnTimeoutMs,
-    status: deps.config.status,
-    log: deps.log,
+    sender: inbound.sender,
+    isGroup: inbound.isGroup,
+    text: inbound.text,
+    images: inbound.images,
+    messageId: message.message_id,
+    startedAt: receivedAt,
   })
-
-  if (result.text !== '') {
-    await deps.chatLog.append(chatId, {
-      ts: new Date().toISOString(),
-      message_id: result.sentMessageId ?? 0,
-      user_id: deps.botId,
-      name: deps.botUsername,
-      text: result.text,
-      reply_to: message.message_id,
-      bot: true,
-    })
-  }
-  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
   deps.log.info(`dsh-telegram: chat ${chatId} message ${message.message_id} -> ${result.outcome}`
     + ` (lag ${seconds(lagMs)}, prep ${seconds(prepMs)}, agent ${seconds(result.timing.agentMs)}, deliver ${seconds(result.timing.deliverMs)})`)
 }
@@ -187,6 +231,8 @@ export interface Dispatcher {
   enqueue(chatId: number, task: () => Promise<void>): void
   /** Whether the chat has a running or waiting task. */
   isBusy(chatId: number): boolean
+  /** Queues an agent turn nobody typed; it waits behind the chat's running and queued tasks. */
+  prompt(chatId: number, input: PromptInput): void
 }
 
 /**
@@ -222,5 +268,6 @@ export function createDispatcher(deps: BotDeps): Dispatcher {
     },
     enqueue,
     isBusy: chatId => chains.has(chatId),
+    prompt: (chatId, input) => enqueue(chatId, () => promptTurn(deps, chatId, input)),
   }
 }

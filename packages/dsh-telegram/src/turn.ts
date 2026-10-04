@@ -15,7 +15,7 @@ import {
   stripCollapse,
   toolStatus,
 } from './render.ts'
-import type { TelegramApi } from './telegram-api.ts'
+import type { ReplyTarget, TelegramApi } from './telegram-api.ts'
 
 /** Structural slice of dsh's Agent used by the runner (the real Agent satisfies it). */
 export interface TurnAgent {
@@ -38,7 +38,8 @@ export interface TurnOptions {
   agent: TurnAgent
   feed: SessionEventFeed
   chatId: number
-  replyToMessageId: number
+  /** The message this turn answers; undefined for a turn nobody typed, which quotes nothing. */
+  replyToMessageId?: number
   content: ContentBlock[]
   outboxDir: string
   messageSize: number
@@ -162,22 +163,27 @@ class Placeholder {
   }
 }
 
-async function sendPart(api: TelegramApi, chatId: number, part: string, replyToMessageId: number, log: TurnOptions['log']): Promise<number> {
-  const replyTo = { messageId: replyToMessageId }
+/** Reply parameters for a send; empty when the turn answers no message. */
+function replyTarget(messageId: number | undefined): { replyTo?: ReplyTarget } {
+  return messageId === undefined ? {} : { replyTo: { messageId } }
+}
+
+async function sendPart(api: TelegramApi, chatId: number, part: string, replyToMessageId: number | undefined, log: TurnOptions['log']): Promise<number> {
+  const reply = replyTarget(replyToMessageId)
   try {
-    return (await api.sendMessage(chatId, part, { parseMode: 'HTML', replyTo })).messageId
+    return (await api.sendMessage(chatId, part, { parseMode: 'HTML', ...reply })).messageId
   } catch (error) {
     log.warn(`dsh-telegram: HTML send rejected (${String(error)})`)
   }
   const stripped = stripCollapse(part)
   if (stripped !== part) {
     try {
-      return (await api.sendMessage(chatId, stripped, { parseMode: 'HTML', replyTo })).messageId
+      return (await api.sendMessage(chatId, stripped, { parseMode: 'HTML', ...reply })).messageId
     } catch (error) {
       log.warn(`dsh-telegram: send without collapse rejected (${String(error)})`)
     }
   }
-  return (await api.sendMessage(chatId, part, { replyTo })).messageId
+  return (await api.sendMessage(chatId, part, { ...reply })).messageId
 }
 
 async function sendMarkdownDocument(options: TurnOptions, markdown: string, html: string): Promise<number> {
@@ -189,7 +195,7 @@ async function sendMarkdownDocument(options: TurnOptions, markdown: string, html
     filename,
     caption: captionPrefix(html, CAPTION_MAX_BYTES),
     parseMode: 'HTML',
-    replyTo: { messageId: options.replyToMessageId },
+    ...replyTarget(options.replyToMessageId),
   })
   return sent.messageId
 }
@@ -198,7 +204,7 @@ export async function runTurn(options: TurnOptions): Promise<TurnResult> {
   const { api, agent, chatId, log } = options
   const now = options.now ?? Date.now
   await api.sendChatAction(chatId, 'typing')
-  const placeholderId = (await api.sendMessage(chatId, options.status.thinking, { replyTo: { messageId: options.replyToMessageId } })).messageId
+  const placeholderId = (await api.sendMessage(chatId, options.status.thinking, { ...replyTarget(options.replyToMessageId) })).messageId
   const placeholder = new Placeholder(api, chatId, placeholderId, options.statusEditIntervalMs, now, options.status.thinking)
 
   const firstSeq = agent.session.seq
@@ -265,7 +271,7 @@ async function deliver(options: TurnOptions, placeholder: Placeholder, summary: 
       return { outcome: 'document', text: summary.text, sentMessageId }
     } catch (error) {
       log.error(`dsh-telegram: markdown document send failed (${String(error)})`)
-      await api.sendMessage(chatId, UNDELIVERED_NOTICE, { replyTo: { messageId: options.replyToMessageId } })
+      await api.sendMessage(chatId, UNDELIVERED_NOTICE, { ...replyTarget(options.replyToMessageId) })
       return { outcome: 'undelivered', text: summary.text }
     }
   }

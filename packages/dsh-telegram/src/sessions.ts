@@ -63,6 +63,14 @@ export class ChatAgents {
     return this.turns.get(chatId)
   }
 
+  /** Chat whose live agent has this id; undefined for subagents and unknown sessions. */
+  chatOf(agentId: string): number | undefined {
+    for (const [chatId, handle] of this.handles) {
+      if (String(handle.agent.id) === agentId) return chatId
+    }
+    return undefined
+  }
+
   memoryInjected(chatId: number, sessionId: string): boolean {
     return this.injected.get(chatId) === sessionId
   }

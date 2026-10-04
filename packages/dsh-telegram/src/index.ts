@@ -106,6 +106,11 @@ async function start(ctx: Context, config: Config): Promise<Started> {
       queue: dispatcher,
       bot: { id: bot.botInfo.id, username: bot.botInfo.username },
       selection: { provider: config.provider, model: config.model },
+      dataDir: config.dataDir,
+      superAdmins: config.superAdmins,
+      chatOf: agentId => agents.chatOf(agentId),
+      turnOf: chatId => agents.turnOf(chatId),
+      prompt: (chatId, input) => dispatcher.prompt(chatId, input),
     },
   }
 }
