@@ -306,6 +306,20 @@ describe('handleMessage', () => {
     releaseFirst()
   })
 
+  it('dispatcher notes a turn as soon as an addressed message arrives, ahead of work already queued', async () => {
+    const noteTurn = vi.fn()
+    const dispatcher = createDispatcher({ ...deps, noteTurn })
+    let release!: () => void
+    dispatcher.enqueue(5, () => new Promise<void>((resolve) => { release = resolve }))
+    dispatcher.dispatch(msg({ text: 'chatter', from: bob }, 'supergroup', 21))
+    expect(noteTurn).not.toHaveBeenCalled()
+    dispatcher.dispatch(msg({ text: 'hello' }, 'private', 22))
+    expect(noteTurn).toHaveBeenCalledWith(5)
+    await vi.waitFor(() => expect(release).toBeDefined())
+    release()
+    await vi.waitFor(() => expect(dispatcher.isBusy(5)).toBe(false))
+  })
+
   it('notes a handled turn but not log-only messages or commands', async () => {
     const noteTurn = vi.fn()
     const withNote = { ...deps, noteTurn }

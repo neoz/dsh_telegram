@@ -77,7 +77,12 @@ interface ChatIdleState {
 }
 ```
 
-- At start, `recent` is seeded from `chatLog.readAll` once per chat.
+- At start, `recent` is seeded from `chatLog.readAll` once per chat. Lines that
+  arrive while a chat is being seeded are held and replayed afterwards, minus
+  those the seed already read, so none is lost or counted twice.
+- Live lines are timed by arrival (host clock); seeded lines by their logged
+  time. A Telegram clock that differs from the host's does not skew the hot
+  window, and an out-of-order line never moves `burst.lastHumanAt` backwards.
 - `lastTurnAt` is still set from `telegram/turn`.
 - `lastAttemptAt` is removed; slots replace it.
 
@@ -136,7 +141,8 @@ The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
 
 `idle-decisions.jsonl` keeps its format:
 
-- `start` lists the new config fields.
+- `start` lists the new config fields and is written once every window is
+  seeded, marking idle as live.
 - `check` is recorded for every verdict except `not_hot`, and only when it
   differs from the chat's `lastVerdict` in the current burst, except `go`
   and `chance_miss`, which are recorded every time because each one is a
@@ -151,6 +157,9 @@ The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
 - An exception while evaluating a message is caught and logged in the
   listener. The chat-log write and other chats are unaffected.
 - Queued-task, LLM and Telegram failures are handled as today.
+- The dispatcher notes a turn (`telegram/turn`) as soon as an addressed message
+  arrives, not only when it is handled, so an idle task already queued ahead of
+  it sees the turn in its re-check and cancels.
 - When the plugin stops, Cordis removes the listeners and `lifetime` aborts
   queued and running tasks, as today.
 - Known limitation: a restart in the middle of a burst resets `slotsUsed` (and,

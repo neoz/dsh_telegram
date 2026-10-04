@@ -90,6 +90,20 @@ describe('slot spacing', () => {
   })
 })
 
+describe('clock', () => {
+  it('times live lines by arrival, so a Telegram clock ten minutes behind still forms a burst', () => {
+    const state = emptyChatState()
+    for (const [i, entry] of hot(NOW - 10 * MIN).entries()) observe(state, entry, base, NOW - (4 - i) * 30_000)
+    expect(evaluate(state, NOW, base, hit).verdict).toBe('go')
+  })
+  it('keeps the burst clock moving forward when an older line arrives late', () => {
+    const state = stateWith(hot())
+    const { lastHumanAt } = state.burst
+    observe(state, human(30, 3), base)
+    expect(state.burst.lastHumanAt).toBe(lastHumanAt)
+  })
+})
+
 describe('observe', () => {
   it('starts a new burst after burstGapMinutes of silence, resetting slots and the last verdict', () => {
     const state = stateWith(hot())
@@ -106,7 +120,7 @@ describe('observe', () => {
     const { burst } = state
     observe(state, bot(40, -1), base)
     expect(state.burst).toEqual(burst)
-    expect(state.recent.at(-1)!.message_id).toBe(40)
+    expect(state.recent.at(-1)!.entry.message_id).toBe(40)
   })
 
   it('keeps the retention window but never fewer than contextMessages entries', () => {

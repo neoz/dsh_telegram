@@ -9,8 +9,11 @@ export type CheckVerdict = 'go' | 'not_hot' | 'one_speaker' | 'not_idle' | 'burs
 
 /** Per-chat idle state fed by chat-log lines; times are epoch milliseconds, `day` is the local `dayKey`. */
 export interface ChatIdleState {
-  /** Recent lines, oldest first: the retention window, never fewer than the newest `contextMessages`. */
-  recent: ChatLogEntry[]
+  /**
+   * Recent lines, oldest first: the retention window, never fewer than the newest `contextMessages`.
+   * `at` is when the line arrived (host clock) for live lines, or its logged time when seeded.
+   */
+  recent: Array<{ entry: ChatLogEntry; at: number }>
   /** `lastSlotAt` is when the last slot was rolled, so a second slot waits `idleMinutes` even after a miss. */
   burst: { since: number; lastHumanAt: number; slotsUsed: number; lastSlotAt: number }
   lastEngagedAt: number
@@ -50,14 +53,14 @@ export function answeredIds(entries: readonly ChatLogEntry[]): Set<number> {
   }))
 }
 
-const timeOf = (entry: ChatLogEntry) => Date.parse(entry.ts)
-
-/** Adds a line to the window; a human line after more than `burstGapMinutes` of silence starts a new burst. */
-export function observe(state: ChatIdleState, entry: ChatLogEntry, config: IdleConfig): void {
-  const at = timeOf(entry)
-  state.recent.push(entry)
+/**
+ * Adds a line to the window; a human line after more than `burstGapMinutes` of silence starts a new burst.
+ * Live lines pass their arrival time, so a Telegram clock that differs from the host's does not skew the window.
+ */
+export function observe(state: ChatIdleState, entry: ChatLogEntry, config: IdleConfig, at = Date.parse(entry.ts)): void {
+  state.recent.push({ entry, at })
   const cutoff = at - Math.max(config.hotWindowMinutes, config.burstGapMinutes, config.idleMinutes) * MINUTE_MS
-  const firstKept = state.recent.findIndex(e => timeOf(e) >= cutoff)
+  const firstKept = state.recent.findIndex(e => e.at >= cutoff)
   const stale = firstKept < 0 ? state.recent.length : firstKept
   const drop = Math.min(stale, Math.max(0, state.recent.length - config.contextMessages))
   if (drop > 0) state.recent.splice(0, drop)
@@ -66,13 +69,14 @@ export function observe(state: ChatIdleState, entry: ChatLogEntry, config: IdleC
     state.burst = { since: at, lastHumanAt: at, slotsUsed: 0, lastSlotAt: 0 }
     state.lastVerdict = undefined
   } else {
-    state.burst.lastHumanAt = at
+    // A line that arrives out of order never moves the burst clock backwards.
+    state.burst.lastHumanAt = Math.max(state.burst.lastHumanAt, at)
   }
 }
 
 function lastBotActivity(state: ChatIdleState): number {
-  const lastBot = state.recent.findLast(e => e.bot === true)
-  return Math.max(lastBot === undefined ? 0 : timeOf(lastBot), state.lastEngagedAt, state.lastTurnAt)
+  const lastBot = state.recent.findLast(e => e.entry.bot === true)
+  return Math.max(lastBot === undefined ? 0 : lastBot.at, state.lastEngagedAt, state.lastTurnAt)
 }
 
 /**
@@ -81,8 +85,8 @@ function lastBotActivity(state: ChatIdleState): number {
  */
 export function evaluate(state: ChatIdleState, now: number, config: IdleConfig, random: () => number, roll = true): Evaluation {
   const after = now - config.hotWindowMinutes * MINUTE_MS
-  const window = state.recent.filter(e => e.bot !== true && timeOf(e) > after)
-  const taken = new Set([...answeredIds(state.recent), ...state.reacted])
+  const window = state.recent.filter(e => e.entry.bot !== true && e.at > after).map(e => e.entry)
+  const taken = new Set([...answeredIds(state.recent.map(e => e.entry)), ...state.reacted])
   const pickable = new Set(window.filter(e => !taken.has(e.message_id)).map(e => e.message_id))
   const fresh = window.length
   const speakers = new Set(window.map(e => e.user_id)).size

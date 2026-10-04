@@ -87,10 +87,9 @@ describe('idle plugin', () => {
     root.plugin(idlePlugin, config)
     const revoke = root.provide('telegram', service())
     await vi.waitFor(async () => {
+      // The start record is written once the windows are seeded, so messages from here on are evaluated.
       expect((await readFile(join(dir, 'idle-decisions.jsonl'), 'utf8'))).toContain('"event":"start"')
     })
-    // Let the window seeding finish before messages arrive.
-    await new Promise(resolve => setTimeout(resolve, 20))
     return revoke
   }
 
@@ -134,7 +133,9 @@ describe('idle plugin', () => {
     await burst()
     expect(queued).toEqual([])
     root.provide('telegram', service())
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await vi.waitFor(async () => {
+      expect((await readFile(join(dir, 'idle-decisions.jsonl'), 'utf8')).match(/"event":"start"/g)).toHaveLength(2)
+    })
     const now = Date.now()
     for (let i = 0; i < 5; i++) {
       await chatLog.append(A, { ts: new Date(now + i).toISOString(), message_id: 50 + i, user_id: i % 2 === 0 ? 7 : 8, name: 'U', text: 'again' })
@@ -155,8 +156,8 @@ describe('idle plugin', () => {
     await writeFile(join(dir, 'blocker'), 'x')
     root.plugin(idlePlugin, config)
     root.provide('telegram', { ...service(), dataDir: join(dir, 'blocker') })
+    // The failed write is the start record, which comes after seeding.
     await vi.waitFor(() => expect(warnings.some(w => w.includes('idle-decisions.jsonl'))).toBe(true))
-    await new Promise(resolve => setTimeout(resolve, 20))
     await burst()
     expect(queued).toEqual([A])
   })

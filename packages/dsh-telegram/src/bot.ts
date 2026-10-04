@@ -264,6 +264,8 @@ export function createDispatcher(deps: BotDeps): Dispatcher {
         void handleMessage(message, deps).catch(report(message))
         return
       }
+      // Noted on arrival as well, so idle work already queued for this chat sees the turn coming and cancels.
+      if (gate(message, { allowFrom: deps.config.allowFrom, botId: deps.botId, botUsername: deps.botUsername }) === 'handle') deps.noteTurn?.(message.chat.id)
       enqueue(message.chat.id, () => handleMessage(message, deps).catch(report(message)))
     },
     enqueue,

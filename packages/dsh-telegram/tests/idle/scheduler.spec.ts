@@ -81,6 +81,26 @@ describe('startIdle', () => {
     idle.stop()
   })
 
+  it('neither loses nor double-counts lines written while the window is seeded', async () => {
+    for (const [i, m] of [4, 3, 2].entries()) await chatLog.append(CHAT, human(i + 1, m))
+    const snapshot = await chatLog.readAll(CHAT)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const slowLog = { readAll: async () => { await gate; return snapshot }, append: chatLog.append.bind(chatLog) }
+    const idle = start(undefined, { chatLog: slowLog as never })
+    // Line 3 is in the snapshot but its event arrives late; line 4 is written after the snapshot was taken.
+    idle.observe(CHAT, human(3, 2))
+    const late = human(4, 1)
+    await chatLog.append(CHAT, late)
+    idle.observe(CHAT, late)
+    release()
+    await idle.ready
+    await say(idle, human(5, 0.5))
+    idle.stop()
+    expect(tasks).toHaveLength(1)
+    expect(events.find(e => e.event === 'check')).toMatchObject({ verdict: 'go', fresh: 5 })
+  })
+
   it('a bot line never triggers a check', async () => {
     const idle = start()
     await idle.ready
@@ -106,8 +126,10 @@ describe('startIdle', () => {
     expect(decisions()).toEqual([{ action: 'reply', messageId: 5, text: 'hehe' }])
   })
 
-  it('records the start with the burst settings and without the persona', async () => {
+  it('records the start once the windows are seeded, with the burst settings and without the persona', async () => {
     const idle = start()
+    expect(events).toEqual([])
+    await idle.ready
     idle.stop()
     expect(events[0]).toMatchObject({ event: 'start', chatIds: [CHAT], config: { hotWindowMinutes: 5, burstGapMinutes: 15, maxPerBurst: 1 } })
     expect(events[0]).not.toHaveProperty('config.persona')

@@ -62,6 +62,8 @@ export function startIdle(deps: IdleDeps): IdleHandle {
   const record = (event: IdleEventBody): void => deps.record?.({ ts: new Date(now()).toISOString(), ...event } as IdleEvent)
   const states = new Map<number, ChatIdleState>(config.chatIds.map(chatId => [chatId, emptyChatState()]))
   const seeded = new Set<number>()
+  /** Lines that arrive while a chat is being seeded; replayed once the seed is in, minus those it already holds. */
+  const pending = new Map<number, ChatLogEntry[]>(config.chatIds.map(chatId => [chatId, []]))
   // Aborted by stop(), so a task queued or running across a plugin reload never acts through the old bot.
   const lifetime = new AbortController()
 
@@ -87,7 +89,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     }
     let action: IdleAction
     try {
-      action = await decide(deps.llm, state.recent.slice(-config.contextMessages), {
+      action = await decide(deps.llm, state.recent.slice(-config.contextMessages).map(e => e.entry), {
         provider: deps.provider,
         model: deps.model,
         system,
@@ -150,34 +152,52 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     }))
   }
 
+  const live = (chatId: number, state: ChatIdleState, entry: ChatLogEntry): void => {
+    try {
+      observe(state, entry, config, now())
+      if (entry.bot !== true) consider(chatId, state)
+    } catch (error) {
+      log.warn(`dsh-telegram: chat ${chatId} idle check failed: ${errorText(error)}`)
+    }
+  }
+
+  const lineKey = (entry: ChatLogEntry) => `${entry.bot === true ? 'b' : 'h'}:${entry.message_id}:${entry.ts}`
+
   const seed = async (chatId: number): Promise<void> => {
+    const state = states.get(chatId)!
+    const held = new Set<string>()
     try {
       const fresh = emptyChatState()
-      for (const entry of await deps.chatLog.readAll(chatId)) observe(fresh, entry, config)
-      const state = states.get(chatId)!
+      for (const entry of await deps.chatLog.readAll(chatId)) {
+        observe(fresh, entry, config)
+        held.add(lineKey(entry))
+      }
       state.recent = fresh.recent
       state.burst = fresh.burst
     } catch (error) {
       log.warn(`dsh-telegram: chat ${chatId} idle window could not be seeded: ${errorText(error)}`)
     }
     seeded.add(chatId)
+    const waiting = pending.get(chatId)!
+    pending.delete(chatId)
+    for (const entry of waiting) if (!held.has(lineKey(entry))) live(chatId, state, entry)
   }
 
-  const ready = Promise.all(config.chatIds.map(seed)).then(() => {})
   log.info(`dsh-telegram: idle engagement on for ${config.chatIds.length} chat(s)`)
   const { persona: _persona, chatIds, enabled: _enabled, ...settings } = config
-  record({ event: 'start', chatIds: [...chatIds], config: { enabled: true, ...settings } })
+  // The start record marks idle as live, so it is written once every window is seeded.
+  const ready = Promise.all(config.chatIds.map(seed)).then(() => {
+    record({ event: 'start', chatIds: [...chatIds], config: { enabled: true, ...settings } })
+  })
   return {
     observe: (chatId, entry) => {
       const state = states.get(chatId)
-      // Lines that arrive while seeding are already in the log the seed reads.
-      if (state === undefined || !seeded.has(chatId) || lifetime.signal.aborted) return
-      try {
-        observe(state, entry, config)
-        if (entry.bot !== true) consider(chatId, state)
-      } catch (error) {
-        log.warn(`dsh-telegram: chat ${chatId} idle check failed: ${errorText(error)}`)
+      if (state === undefined || lifetime.signal.aborted) return
+      if (!seeded.has(chatId)) {
+        pending.get(chatId)?.push(entry)
+        return
       }
+      live(chatId, state, entry)
     },
     noteTurn: (chatId) => {
       const state = states.get(chatId)
