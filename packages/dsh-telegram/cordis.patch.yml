@@ -37,6 +37,12 @@
         model: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
         superAdmins: !!js (process.env.TELEGRAM_SUPER_ADMINS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0)
 
+    # Telegram sends no browser zone, so the clock always formats in this fallback zone.
+    - id: time-context
+      name: '@deepseek-ai/dsh-time-context'
+      config:
+        timeZone: Asia/Ho_Chi_Minh
+
     - id: telegram-idle
       name: dsh-telegram/idle
       config:

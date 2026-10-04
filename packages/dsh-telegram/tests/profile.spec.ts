@@ -52,4 +52,10 @@ describe('profile patch', () => {
     }
     expect(row(await rows('../cordis.patch.yml'), 'telegram-idle').name).toBe('dsh-telegram/idle')
   })
+
+  it('gives the agent a clock in the local zone, since Telegram sends no browser zone', async () => {
+    const clock = row(await rows('../cordis.patch.yml'), 'time-context')
+    expect(clock.name).toBe('@deepseek-ai/dsh-time-context')
+    expect(clock.config).toEqual({ timeZone: 'Asia/Ho_Chi_Minh' })
+  })
 })
