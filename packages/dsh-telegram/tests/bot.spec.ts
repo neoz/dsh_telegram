@@ -275,11 +275,11 @@ describe('handleMessage', () => {
     const { dispatch } = createDispatcher(deps)
     dispatch(msg({ text: 'one' }, 'private', 11))
     dispatch(msg({ text: 'two' }, 'private', 12))
-    await new Promise(r => setTimeout(r, 5))
+    // Wait for the first turn to start instead of sleeping a fixed time; under a loaded run 5 ms was not always enough.
+    await vi.waitFor(() => expect(order).toContain('a-start'))
     expect(order).toEqual(['a-start'])
     releaseFirst()
-    await new Promise(r => setTimeout(r, 5))
-    expect(order).toEqual(['a-start', 'a-end', 'b-start'])
+    await vi.waitFor(() => expect(order).toEqual(['a-start', 'a-end', 'b-start']))
   })
 
   it('dispatcher runs /stop immediately while a turn is queued', async () => {
