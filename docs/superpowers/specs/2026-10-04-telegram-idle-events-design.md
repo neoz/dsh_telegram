@@ -1,0 +1,180 @@
+# dsh-telegram: event-driven idle engagement
+
+Date: 2026-10-04
+Status: approved design, pending implementation plan
+
+## Goal
+
+Idle engagement (`dsh-telegram/idle`) checks each group on a fixed 10-minute
+tick, so it joins a hot conversation 10 to 20 minutes late, often after it has
+died down. Replaying 2026-10-04's chat log showed a 40-minute burst whose first
+eligible tick came 10 minutes in. This change makes idle react to each new
+message instead, so it decides within one or two minutes of a group heating
+up.
+
+By default the bot still joins a burst at most once and the daily cap stays,
+so it gets more timely, not more frequent. Joining more than once per burst is
+a configuration choice (`maxPerBurst`).
+
+## Decisions
+
+| Topic | Decision |
+|---|---|
+| Trigger | A new core event, `telegram/message`, fired for every line appended to a chat log. Idle evaluates on each human message. The interval timer goes away. |
+| Hot | At least `minNewMessages` human messages in the last `hotWindowMinutes`, from at least two different senders. Two is fixed, not configurable. |
+| Burst | A run of human messages with no gap longer than `burstGapMinutes`; a longer gap starts a new burst. |
+| Slots | `maxPerBurst` engagements per burst (default 1). A second slot also needs `idleMinutes` of bot silence. |
+| Chance | Rolled once per slot. Hit or miss, the roll uses the slot; a slot leads to at most one LLM call, and an LLM `skip` uses it too. |
+| State | Kept in memory per allowlisted chat. Seeded from the chat log once at start, then fed by events. |
+| Unchanged | `maxPerDay`, quiet hours, the LLM prompt and output validation, the in-queue re-check, delivery, `telegram/turn`. |
+
+## Core: `telegram/message`
+
+`ChatLog` takes an optional listener:
+
+```ts
+constructor(dir: string, onAppend?: (chatId: number, entry: ChatLogEntry) => void)
+```
+
+`append` calls it after the line is written. A failed write throws as before
+and calls nothing. `src/index.ts` builds the chat log with
+`onAppend: (chatId, entry) => ctx.emit('telegram/message', chatId, entry)`, so
+every writer emits the event: logged and handled messages, bot replies, idle
+replies, and `message` reminders written through `telegram.chatLog`.
+
+`src/service.ts` declares it next to `telegram/turn`:
+
+```ts
+interface Events {
+  /** A line was appended to a chat's log (human or bot), after it was written. */
+  'telegram/message'(chatId: number, entry: ChatLogEntry): void
+}
+```
+
+Listeners run synchronously through `ctx.emit`. Cordis catches a throwing
+listener, so a listener failure never breaks the write. Code that builds a
+`ChatLog` without a listener behaves as before.
+
+## Idle: per-chat state
+
+```ts
+interface ChatIdleState {
+  /** Entries of the last max(hotWindowMinutes, burstGapMinutes, idleMinutes) minutes, and never fewer than the newest contextMessages entries; oldest first. */
+  recent: ChatLogEntry[]
+  burst: { since: number; lastHumanAt: number; slotsUsed: number }
+  lastEngagedAt: number
+  lastTurnAt: number
+  day: string
+  count: number
+  reacted: number[]
+  /** Last check verdict recorded in this burst, to skip repeats. */
+  lastVerdict?: CheckVerdict
+}
+```
+
+- At start, `recent` is seeded from `chatLog.readAll` once per chat.
+- `lastTurnAt` is still set from `telegram/turn`.
+- `lastAttemptAt` is removed; slots replace it.
+
+## Idle: evaluation on each human message
+
+On `telegram/message` for an allowlisted chat:
+
+1. Append the entry to `recent` and drop entries older than the retention
+   window, keeping at least the newest `contextMessages` entries so the LLM
+   gets as much context as today. Bot entries stop here: they only feed `not_idle` and the
+   answered-message set.
+2. For a human entry, if its time is more than `burstGapMinutes` after
+   `burst.lastHumanAt`, start a new burst
+   (`since = now, slotsUsed = 0, lastVerdict = undefined`). Then set
+   `lastHumanAt`.
+3. Evaluate. The first condition that blocks wins:
+
+| Verdict | Blocks when |
+|---|---|
+| `busy` | The chat's dispatcher queue has a running or waiting task. |
+| `not_hot` | Fewer than `minNewMessages` human messages in the last `hotWindowMinutes`. |
+| `one_speaker` | Enough messages, but from a single sender. |
+| `not_idle` | Bot activity within the last `idleMinutes`: the newest bot entry, `lastEngagedAt`, or `lastTurnAt`. |
+| `burst_spent` | `burst.slotsUsed >= maxPerBurst`. |
+| `nothing_pickable` | No human message in the last `hotWindowMinutes` that the bot has not answered (`handled`, or the `reply_to` of a bot entry) or reacted to. |
+| `daily_cap` | `maxPerDay` engagements today, by calendar day in `timezone`. |
+| `quiet_hours` | The current hour in `timezone` is in `[quietHours.from, quietHours.to)`. |
+| `chance_miss` / `go` | `slotsUsed++`, then `random() < chance`. |
+
+4. On `go`, enqueue the engagement task on the chat's queue. Inside the task,
+   re-run the evaluation without the busy check and without rolling or using a
+   slot. If anything now blocks (for example the bot was addressed meanwhile),
+   record `cancelled` and stop. Otherwise call the LLM with the newest
+   `contextMessages` entries of `recent`, with pickable messages marked
+   `(open)`, and deliver exactly as today. A `react` or `reply` sets
+   `lastEngagedAt`, counts toward `maxPerDay`, and records the reaction.
+
+The evaluation is a pure function of the state, `now`, the config and `random`,
+so it is tested without timers.
+
+## Configuration
+
+| Field | Default | Note |
+|---|---|---|
+| `hotWindowMinutes` | 5 | New, min 1. Also the window for pickable messages, replacing `checkIntervalMinutes`. |
+| `burstGapMinutes` | 15 | New, min 1. |
+| `maxPerBurst` | 1 | New, min 1. |
+| `chance` | 0.3 | Now per slot. The bundle and profile keep 0.5. |
+| `checkIntervalMinutes` | removed | No timer. |
+| `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is also the minimum gap between two slots of one burst. |
+
+The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
+`chance: 0.5`) stay valid and need no change.
+
+## Decision log
+
+`idle-decisions.jsonl` keeps its format:
+
+- `start` lists the new config fields.
+- `check` is recorded for every verdict except `not_hot`, and only when it
+  differs from the chat's `lastVerdict` in the current burst. A record has
+  `{ ts, chatId, event: "check", verdict, fresh, speakers, pickable, burstSince, slotsUsed }`.
+  `busy` records carry only `verdict`.
+- `decision` is unchanged (`react`, `reply`, `skip`, `cancelled`, `error`).
+
+## Error handling
+
+- Seeding a chat's window fails (corrupted chat log): warning logged, the chat
+  starts with an empty window, and other chats are unaffected.
+- An exception while evaluating a message is caught and logged in the
+  listener. The chat-log write and other chats are unaffected.
+- Queued-task, LLM and Telegram failures are handled as today.
+- When the plugin stops, Cordis removes the listeners and `lifetime` aborts
+  queued and running tasks, as today.
+- Known limitation: a restart in the middle of a burst resets `slotsUsed` (and,
+  as today, the daily counter), so the bot may join that burst once more.
+
+## Testing (vitest)
+
+- `ChatLog`: `onAppend` is called with the chat id and entry after a write,
+  and not on a failed write.
+- Evaluation (pure):
+  - each verdict in the table, including `one_speaker` and `burst_spent`;
+  - a new burst after `burstGapMinutes`;
+  - one chance roll per slot, a miss using the slot;
+  - `maxPerBurst: 2` allowing a second engagement after `idleMinutes` while
+    the burst stays hot;
+  - bot entries never trigger an evaluation.
+- Event-driven scheduler (fake queue, real `ChatLog` in a temp directory):
+  - reaching the threshold enqueues at once, with no timer;
+  - a busy chat records `busy`;
+  - the in-queue re-check cancels when the bot was addressed meanwhile;
+  - `check` records are not repeated while the verdict stays the same;
+  - the window is seeded at start;
+  - a corrupted chat log in one chat leaves the others working.
+- Plugin: lifecycle as today; an entry written through `telegram.chatLog`
+  (which emits `telegram/message`) leads to a queued task.
+- Profile: the bundle and profile idle rows still validate against the new
+  schema.
+
+## Out of scope
+
+- A deliberate delay before joining (waiting for the group to pause).
+- Persisting burst state across restarts.
+- A configurable minimum number of speakers.
