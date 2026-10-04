@@ -3,3 +3,4 @@ lib/
 .env
 workspace/
 data/
+reports/
