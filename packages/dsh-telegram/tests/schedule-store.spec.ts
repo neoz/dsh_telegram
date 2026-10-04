@@ -56,4 +56,11 @@ describe('ReminderStore', () => {
       expect(await readFile(file, 'utf8')).toBe(text)
     }
   })
+
+  it('rejects a record whose rule dsh-schedule cannot decode', async () => {
+    const file = join(dir, 'schedule.json')
+    const bad = { ...one('a'), record: { ...buildRecord('a', 'T', 'p', { every_seconds: 300 }, NOW, 'UTC'), everySeconds: '60' } }
+    await writeFile(file, JSON.stringify({ version: 1, reminders: [bad] }))
+    expect(() => new ReminderStore(file).load()).toThrow(/schedule\.json/)
+  })
 })

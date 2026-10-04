@@ -128,6 +128,19 @@ describe('startScheduler', () => {
     s.stop()
   })
 
+  it('waits a minute before retrying after a failed delivery instead of spinning', async () => {
+    await add('a', { after_seconds: 60 })
+    now = NOW + 60_000
+    const update = vi.spyOn(store, 'update').mockRejectedValue(new Error('disk full'))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const s = scheduler()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(update).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(update).toHaveBeenCalledTimes(2)
+    s.stop()
+  })
+
   it('arms one timer for the earliest reminder and clears it on stop', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     await add('a', { after_seconds: 60 })

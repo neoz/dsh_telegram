@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { decodeScheduleRecord } from '@deepseek-ai/dsh-schedule'
 import type { Reminder } from './schedule.ts'
 
 interface ScheduleFile { version: 1; reminders: Reminder[] }
@@ -10,8 +11,17 @@ function isReminder(value: unknown): value is Reminder {
   return typeof r === 'object' && r !== null
     && Number.isInteger(r.chatId) && Number.isInteger(r.creator?.id) && typeof r.creator?.name === 'string'
     && (r.mode === 'message' || r.mode === 'agent')
-    && typeof r.record?.id === 'string' && typeof r.record.title === 'string' && typeof r.record.prompt === 'string'
-    && !Number.isNaN(Date.parse(r.record.scheduledAt))
+    && decodes(r.record)
+}
+
+/** dsh-schedule's own decoder checks the rule fields, so a hand-edited record fails at load rather than at delivery. */
+function decodes(record: unknown): boolean {
+  try {
+    decodeScheduleRecord(record)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Active reminders in one JSON file; changes run one at a time and replace the list only once written. */

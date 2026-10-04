@@ -4,6 +4,8 @@ import type { TelegramService } from './service.ts'
 
 /** Node keeps timers in a signed 32-bit millisecond field; longer waits are re-armed in steps. */
 const MAX_DELAY_MS = 2_147_483_647
+/** After a failed delivery (e.g. the store cannot be written) the timer waits this long instead of firing again at once. */
+const RETRY_AFTER_FAILURE_MS = 60_000
 
 export interface SchedulerDeps {
   store: ReminderStore
@@ -29,12 +31,12 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   let stopped = false
   let running: Promise<void> = Promise.resolve()
 
-  const arm = (): void => {
+  const arm = (minDelayMs = 0): void => {
     if (timer !== undefined) clearTimeout(timer)
     timer = undefined
     const at = nextDueAt(store.all())
     if (stopped || at === undefined) return
-    timer = setTimeout(() => { void tick() }, Math.min(Math.max(at - now(), 0), MAX_DELAY_MS))
+    timer = setTimeout(() => { void tick() }, Math.min(Math.max(at - now(), minDelayMs), MAX_DELAY_MS))
   }
 
   /** Advances or drops the reminder first, then sends: a crash in between loses one delivery, never duplicates it. */
@@ -69,22 +71,24 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   }
 
   const tick = (): Promise<void> => {
+    let failed = false
     running = running.then(async () => {
       for (const reminder of dueReminders(store.all(), now())) {
         if (stopped) return
         try {
           await deliver(reminder.record.id)
         } catch (error) {
+          failed = true
           log.warn(`dsh-telegram: chat ${reminder.chatId} reminder ${reminder.record.id} failed: ${errorText(error)}`)
         }
       }
-    }).finally(arm)
+    }).finally(() => arm(failed ? RETRY_AFTER_FAILURE_MS : 0))
     return running
   }
 
   arm()
   return {
-    changed: arm,
+    changed: () => arm(),
     tick,
     stop: () => {
       stopped = true
