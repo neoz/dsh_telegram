@@ -1,7 +1,9 @@
+import { appendFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
-import { startIdle } from './engage.ts'
+import { startIdle, type IdleEvent } from './engage.ts'
 import type {} from '../service.ts'
 
 /** Unprompted engagement in active groups; see the idle engagement spec. */
@@ -70,6 +72,15 @@ export function apply(ctx: Context, config: IdleConfig): void {
   if (!config.enabled) return
   ctx.inject(['telegram', 'llm'], (ctx) => {
     const logger = ctx.logger('dsh-telegram')
+    const file = join(ctx.telegram.dataDir, 'idle-decisions.jsonl')
+    // Appends run one after another so lines keep their order; a failed write only warns.
+    let writing = Promise.resolve()
+    const record = (event: IdleEvent): void => {
+      writing = writing.then(() => appendFile(file, `${JSON.stringify(event)}
+`, 'utf8')).catch((error: unknown) => {
+        logger.warn(`dsh-telegram: writing ${file} failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
     const { api, chatLog, queue, bot, selection } = ctx.telegram
     const handle = startIdle({
       config,
@@ -82,6 +93,7 @@ export function apply(ctx: Context, config: IdleConfig): void {
       botId: bot.id,
       botUsername: bot.username,
       log: { info: msg => logger.info(msg), warn: msg => logger.warn(msg) },
+      record,
     })
     ctx.on('telegram/turn', chatId => handle.noteTurn(chatId))
     ctx.effect(() => () => handle.stop(), 'dsh-telegram: idle scheduler')

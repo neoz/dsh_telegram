@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatLog, type ChatLogEntry } from '../../src/chatlog.ts'
 import { Config, type IdleConfig } from '../../src/idle/index.ts'
 import {
-  answeredIds, dayKey, decide, emptyIdleState, hourIn, IDLE_EMOJI, idleSystemPrompt, idleTranscript, parseDecision, pickableIds, shouldEngage, startIdle,
-  type IdleDeps, type IdleState,
+  answeredIds, checkEngage, dayKey, decide, emptyIdleState, hourIn, IDLE_EMOJI, idleSystemPrompt, idleTranscript, parseDecision, pickableIds, shouldEngage, startIdle,
+  type IdleDeps, type IdleEvent, type IdleState,
 } from '../../src/idle/engage.ts'
 import { FakeTelegramApi } from '../helpers/fake-api.ts'
 
@@ -83,6 +83,22 @@ describe('shouldEngage', () => {
   it('treats from === to as no quiet hours', () => {
     const { now, entries } = activeAt('2026-10-02T16:30:00Z')
     expect(shouldEngage(undefined, entries, now, { ...base, quietHours: { from: 0, to: 0 } }, hit)).toBe(true)
+  })
+})
+
+describe('checkEngage', () => {
+  const verdict = (state: IdleState | undefined, entries: ChatLogEntry[], now = NOON, random = hit) => checkEngage(state, entries, now, base, random).verdict
+  it('goes, counting fresh and pickable messages', () => {
+    expect(checkEngage(undefined, active, NOON, base, hit)).toEqual({ verdict: 'go', fresh: 5, pickable: 2 })
+  })
+  it('names the first condition that blocks', () => {
+    expect(verdict(undefined, [...active, bot(7, 30)])).toBe('not_idle')
+    expect(verdict(undefined, active.slice(0, 5))).toBe('too_few')
+    expect(verdict(undefined, [bot(1, 150), human(2, 50), human(3, 45), human(4, 40), human(5, 30), human(6, 20)])).toBe('nothing_pickable')
+    expect(verdict(state({ day: dayKey(NOON, base.timezone), count: 5 }), active)).toBe('daily_cap')
+    const night = activeAt('2026-10-02T17:00:00Z')
+    expect(verdict(undefined, night.entries, night.now)).toBe('quiet_hours')
+    expect(verdict(undefined, active, NOON, () => 0.9)).toBe('chance_miss')
   })
 })
 
@@ -217,6 +233,7 @@ describe('startIdle', () => {
   let busy: Set<number>
   let infos: string[]
   let warns: string[]
+  let events: IdleEvent[]
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'idle-'))
@@ -226,6 +243,7 @@ describe('startIdle', () => {
     busy = new Set()
     infos = []
     warns = []
+    events = []
     for (const entry of active) await chatLog.append(CHAT, entry)
   })
   afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
@@ -237,7 +255,7 @@ describe('startIdle', () => {
       queue: { enqueue: (_chatId, task) => { tasks.push(task) }, isBusy: chatId => busy.has(chatId) },
       botId: 1, botUsername: 'dshbot',
       log: { info: m => infos.push(m), warn: m => warns.push(m) },
-      now: () => NOON, random: hit, calls, ...extra,
+      now: () => NOON, random: hit, record: e => events.push(e), calls, ...extra,
     }
   }
   async function runQueued(): Promise<void> {
@@ -262,6 +280,53 @@ describe('startIdle', () => {
     await idle.tick()
     expect(tasks).toHaveLength(0)
     idle.stop()
+  })
+
+  it('records the start, each check and the decision', async () => {
+    const idle = startIdle(deps('{"action":"reply","message_id":6,"text":"hehe"}'))
+    await idle.tick()
+    await runQueued()
+    idle.stop()
+    const ts = new Date(NOON).toISOString()
+    expect(events.map(e => e.event)).toEqual(['start', 'check', 'decision'])
+    expect(events[0]).toMatchObject({ ts, event: 'start', chatIds: [CHAT], config: { idleMinutes: base.idleMinutes, chance: base.chance } })
+    expect(events[0]).not.toHaveProperty('config.persona')
+    expect(events[1]).toEqual({ ts, event: 'check', chatId: CHAT, verdict: 'go', fresh: 5, pickable: 2 })
+    expect(events[2]).toEqual({ ts, event: 'decision', chatId: CHAT, action: 'reply', messageId: 6, text: 'hehe' })
+  })
+
+  it('records a busy chat and a missed chance as checks without a decision', async () => {
+    busy.add(CHAT)
+    const idle = startIdle(deps('{"action":"skip"}', { random: () => 0.9 }))
+    await idle.tick()
+    busy.delete(CHAT)
+    await idle.tick()
+    idle.stop()
+    expect(events.filter(e => e.event === 'check').map(e => (e as { verdict: string }).verdict)).toEqual(['busy', 'chance_miss'])
+    expect(events.some(e => e.event === 'decision')).toBe(false)
+  })
+
+  it('records a cancelled task, a model error and a failed Telegram call', async () => {
+    const cancelled = startIdle(deps('{"action":"react","message_id":5,"emoji":"\u{1F525}"}'))
+    await cancelled.tick()
+    cancelled.noteTurn(CHAT)
+    await runQueued()
+    cancelled.stop()
+    const broken = { async *stream(): AsyncIterable<StreamChunk> { throw new Error('model down') } }
+    const failing = startIdle(deps('', { llm: broken }))
+    await failing.tick()
+    await runQueued()
+    failing.stop()
+    api.failNext('setReaction', new Error('REACTION_INVALID'))
+    const rejected = startIdle(deps('{"action":"react","message_id":5,"emoji":"\u{1F525}"}'))
+    await rejected.tick()
+    await runQueued()
+    rejected.stop()
+    expect(events.filter(e => e.event === 'decision').map(({ ts: _ts, chatId: _chat, event: _event, ...rest }) => rest)).toEqual([
+      { action: 'cancelled' },
+      { action: 'error', error: 'model down' },
+      { action: 'react', messageId: 5, emoji: '\u{1F525}', error: 'REACTION_INVALID' },
+    ])
   })
 
   it('skips a busy chat', async () => {

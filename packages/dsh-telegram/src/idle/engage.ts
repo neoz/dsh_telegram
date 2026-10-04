@@ -52,20 +52,33 @@ export function pickableIds(state: IdleState | undefined, entries: readonly Chat
     .map(e => e.message_id))
 }
 
-export function shouldEngage(state: IdleState | undefined, entries: readonly ChatLogEntry[], now: number, config: IdleConfig, random: () => number): boolean {
+/** Why a check did or did not go ahead; the first condition that blocks wins. */
+export type EngageVerdict = 'go' | 'not_idle' | 'too_few' | 'nothing_pickable' | 'daily_cap' | 'quiet_hours' | 'chance_miss'
+
+export interface EngageCheck { verdict: EngageVerdict; fresh: number; pickable: number }
+
+export function checkEngage(state: IdleState | undefined, entries: readonly ChatLogEntry[], now: number, config: IdleConfig, random: () => number): EngageCheck {
   const s = state ?? emptyIdleState()
   const activity = lastBotActivity(s, entries)
   const idle = config.idleMinutes * MINUTE_MS
-  if (now - activity <= idle) return false
   // Only messages sent since the bot went idle, within the last idleMinutes, count: a stale backlog is no conversation.
   const since = Math.max(activity + idle, now - idle, s.lastAttemptAt)
   const fresh = entries.filter(e => e.bot !== true && Date.parse(e.ts) > since).length
-  if (fresh < config.minNewMessages) return false
-  if (pickableIds(s, entries, now, config).size === 0) return false
-  const today = s.day === dayKey(now, config.timezone) ? s.count : 0
-  if (today >= config.maxPerDay) return false
-  if (inQuietHours(hourIn(now, config.timezone), config.quietHours)) return false
-  return random() < config.chance
+  const pickable = pickableIds(s, entries, now, config).size
+  const verdict = (): EngageVerdict => {
+    if (now - activity <= idle) return 'not_idle'
+    if (fresh < config.minNewMessages) return 'too_few'
+    if (pickable === 0) return 'nothing_pickable'
+    const today = s.day === dayKey(now, config.timezone) ? s.count : 0
+    if (today >= config.maxPerDay) return 'daily_cap'
+    if (inQuietHours(hourIn(now, config.timezone), config.quietHours)) return 'quiet_hours'
+    return random() < config.chance ? 'go' : 'chance_miss'
+  }
+  return { verdict: verdict(), fresh, pickable }
+}
+
+export function shouldEngage(state: IdleState | undefined, entries: readonly ChatLogEntry[], now: number, config: IdleConfig, random: () => number): boolean {
+  return checkEngage(state, entries, now, config, random).verdict === 'go'
 }
 
 /** Reactions Telegram accepts from bots that suit unprompted engagement. */
@@ -182,6 +195,14 @@ export async function decide(llm: IdleLlm, entries: readonly ChatLogEntry[], opt
 
 export interface IdleQueue { enqueue(chatId: number, task: () => Promise<void>): void; isBusy(chatId: number): boolean }
 
+/** One line of the decision log, so missed conversations can be explained afterwards. */
+export type IdleEvent = { ts: string } & (
+  | { event: 'start'; chatIds: number[]; config: Omit<IdleConfig, 'persona' | 'chatIds'> }
+  | { event: 'check'; chatId: number; verdict: EngageVerdict | 'busy'; fresh?: number; pickable?: number }
+  | { event: 'decision'; chatId: number; action: IdleAction['kind'] | 'cancelled' | 'error'; messageId?: number; emoji?: string; text?: string; error?: string }
+)
+type IdleEventBody = IdleEvent extends infer E ? E extends IdleEvent ? Omit<E, 'ts'> : never : never
+
 export interface IdleDeps {
   config: IdleConfig
   provider: string
@@ -195,6 +216,8 @@ export interface IdleDeps {
   log: { info(msg: string): void; warn(msg: string): void }
   now?: () => number
   random?: () => number
+  /** Receives every start, check and decision; the plugin appends them to a JSONL file. */
+  record?: (event: IdleEvent) => void
 }
 
 export interface IdleHandle {
@@ -220,6 +243,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
   const now = deps.now ?? Date.now
   const random = deps.random ?? Math.random
   const system = idleSystemPrompt(config.persona, deps.model)
+  const record = (event: IdleEventBody): void => deps.record?.({ ts: new Date(now()).toISOString(), ...event } as IdleEvent)
   const states = new Map<number, IdleState>()
   // Aborted by stop(), so a task queued or running across a plugin reload never acts through the old bot.
   const lifetime = new AbortController()
@@ -236,7 +260,10 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     if (lifetime.signal.aborted) return
     const entries = await deps.chatLog.readAll(chatId)
     // Re-check without the chance roll: the bot may have been addressed while this task waited.
-    if (!shouldEngage(states.get(chatId), entries, now(), config, () => 0)) return
+    if (!shouldEngage(states.get(chatId), entries, now(), config, () => 0)) {
+      record({ event: 'decision', chatId, action: 'cancelled' })
+      return
+    }
     const state = stateFor(chatId)
     state.lastAttemptAt = now()
     let action: IdleAction
@@ -249,12 +276,19 @@ export function startIdle(deps: IdleDeps): IdleHandle {
         signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDLE_TIMEOUT_MS)]),
       })
     } catch (error) {
-      if (!lifetime.signal.aborted) log.warn(`dsh-telegram: chat ${chatId} idle decision failed: ${errorText(error)}`)
+      if (!lifetime.signal.aborted) {
+        log.warn(`dsh-telegram: chat ${chatId} idle decision failed: ${errorText(error)}`)
+        record({ event: 'decision', chatId, action: 'error', error: errorText(error) })
+      }
       return
     }
     if (lifetime.signal.aborted) return
     log.info(`dsh-telegram: chat ${chatId} idle -> ${describeAction(action)}`)
-    if (action.kind === 'skip') return
+    if (action.kind === 'skip') {
+      record({ event: 'decision', chatId, action: 'skip' })
+      return
+    }
+    const detail = action.kind === 'react' ? { emoji: action.emoji } : { text: action.text }
     const at = now()
     const day = dayKey(at, config.timezone)
     state.count = state.day === day ? state.count + 1 : 1
@@ -264,6 +298,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
       if (action.kind === 'react') {
         state.reacted = [...state.reacted, action.messageId].slice(-MAX_REACTED)
         await deps.api.setReaction(chatId, action.messageId, action.emoji)
+        record({ event: 'decision', chatId, action: 'react', messageId: action.messageId, ...detail })
         return
       }
       const sent = await deps.api.sendMessage(chatId, action.text, { replyTo: { messageId: action.messageId } })
@@ -276,17 +311,24 @@ export function startIdle(deps: IdleDeps): IdleHandle {
         reply_to: action.messageId,
         bot: true,
       })
+      record({ event: 'decision', chatId, action: 'reply', messageId: action.messageId, ...detail })
     } catch (error) {
       log.warn(`dsh-telegram: chat ${chatId} idle ${action.kind} failed: ${errorText(error)}`)
+      record({ event: 'decision', chatId, action: action.kind, messageId: action.messageId, ...detail, error: errorText(error) })
     }
   }
 
   const tick = async (): Promise<void> => {
     for (const chatId of config.chatIds) {
-      if (deps.queue.isBusy(chatId)) continue
+      if (deps.queue.isBusy(chatId)) {
+        record({ event: 'check', chatId, verdict: 'busy' })
+        continue
+      }
       try {
         const entries = await deps.chatLog.readAll(chatId)
-        if (!shouldEngage(states.get(chatId), entries, now(), config, random)) continue
+        const check = checkEngage(states.get(chatId), entries, now(), config, random)
+        record({ event: 'check', chatId, ...check })
+        if (check.verdict !== 'go') continue
         deps.queue.enqueue(chatId, () => engage(chatId).catch((error: unknown) => {
           log.warn(`dsh-telegram: chat ${chatId} idle task failed: ${errorText(error)}`)
         }))
@@ -298,6 +340,8 @@ export function startIdle(deps: IdleDeps): IdleHandle {
 
   const timer = setInterval(() => { void tick() }, config.checkIntervalMinutes * MINUTE_MS).unref()
   log.info(`dsh-telegram: idle engagement on for ${config.chatIds.length} chat(s)`)
+  const { persona: _persona, chatIds, enabled: _enabled, ...settings } = config
+  record({ event: 'start', chatIds: [...chatIds], config: { enabled: true, ...settings } })
   return {
     noteTurn: (chatId) => { stateFor(chatId).lastTurnAt = now() },
     tick,

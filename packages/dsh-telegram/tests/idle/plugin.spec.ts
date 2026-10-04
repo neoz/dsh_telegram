@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -70,7 +70,8 @@ describe('idle plugin', () => {
       queue: { enqueue: (chatId, task) => { queued.push({ chatId, task }) }, isBusy: () => false },
       bot: { id: 1, username: 'dshbot' },
       selection: { provider: 'p', model: 'm' },
-    }
+      dataDir: dir,
+    } as TelegramService
   }
 
   beforeEach(async () => {
@@ -146,6 +147,25 @@ describe('idle plugin', () => {
     await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline))
     for (const { task } of queued) await task()
     expect(calls).toHaveLength(0)
+  })
+
+  it('appends its events to idle-decisions.jsonl in the data dir', async () => {
+    root.plugin(idlePlugin, config)
+    root.provide('telegram', service())
+    await vi.waitFor(async () => {
+      const lines = (await readFile(join(dir, 'idle-decisions.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      expect(lines[0]).toMatchObject({ event: 'start', chatIds: [A, B] })
+    })
+  })
+
+  it('only warns when the decision log cannot be written', async () => {
+    const warnings: string[] = []
+    root.logger.exporter({ levels: { default: 3 }, export: message => { if (message.type === 'warn') warnings.push(String(message.args[0])) } })
+    await writeFile(join(dir, 'blocker'), 'x')
+    root.plugin(idlePlugin, config)
+    root.provide('telegram', { ...service(), dataDir: join(dir, 'blocker') })
+    await vi.waitFor(() => expect(warnings.some(w => w.includes('idle-decisions.jsonl'))).toBe(true))
+    expect(vi.getTimerCount()).toBe(baseline + 1)
   })
 
   it('restarts after a revoke and a new provide', async () => {
