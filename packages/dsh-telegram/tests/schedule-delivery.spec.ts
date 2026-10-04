@@ -132,15 +132,26 @@ describe('startScheduler', () => {
     s.stop()
   })
 
-  it('delivers once when a tick races a change', async () => {
+  it('a tick that races a running one waits for it, keeping order and sending each reminder once', async () => {
     await add('a', { after_seconds: 60 })
+    await add('b', { after_seconds: 61 })
+    let release!: () => void
+    const send = api.sendMessage.bind(api)
+    api.sendMessage = async (chatId, text, options) => {
+      if (text.includes('Ta')) await new Promise<void>((resolve) => { release = resolve })
+      return send(chatId, text, options)
+    }
     const s = scheduler()
-    now = NOW + 60_000
-    const ticking = s.tick()
+    now = NOW + 61_000
+    const first = s.tick()
+    await vi.waitFor(() => expect(release).toBeDefined())
+    const second = s.tick()
     s.changed()
-    await ticking
     await new Promise(resolve => setTimeout(resolve, 20))
-    expect(api.callsTo('sendMessage')).toHaveLength(1)
+    release()
+    await Promise.all([first, second])
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(api.callsTo('sendMessage').map(c => c.args[1])).toEqual(['\u{23F0} Ta\npa', '\u{23F0} Tb\npb'])
     s.stop()
   })
 
