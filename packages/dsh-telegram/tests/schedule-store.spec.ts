@@ -57,6 +57,18 @@ describe('ReminderStore', () => {
     }
   })
 
+  it('refuses to write once closed, so a replaced store cannot overwrite the file', async () => {
+    const file = join(dir, 'schedule.json')
+    const old = new ReminderStore(file)
+    old.load()
+    await old.update(list => list.push(one('a')))
+    old.close()
+    await expect(old.update(list => list.push(one('b')))).rejects.toThrow(/closed/)
+    const reloaded = new ReminderStore(file)
+    reloaded.load()
+    expect(reloaded.all().map(r => r.record.id)).toEqual(['a'])
+  })
+
   it('rejects a record whose rule dsh-schedule cannot decode', async () => {
     const file = join(dir, 'schedule.json')
     const bad = { ...one('a'), record: { ...buildRecord('a', 'T', 'p', { every_seconds: 300 }, NOW, 'UTC'), everySeconds: '60' } }

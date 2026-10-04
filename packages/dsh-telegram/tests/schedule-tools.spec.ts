@@ -41,6 +41,13 @@ const call = async (tool: { execute(args: never, exec: never): Promise<unknown> 
   JSON.parse(String(await tool.execute(args as never, exec(agentId ?? undefined)))) as Record<string, any>
 
 describe('schedule tools', () => {
+  it('keeps after_seconds out of the update schema but still rejects it', async () => {
+    const { create, update } = tools()
+    expect((update as unknown as { parameters: { properties: object } }).parameters.properties).not.toHaveProperty('after_seconds')
+    await call(create, { title: 'T', prompt: 'p', daily: { time: '07:00:00' } })
+    expect((await call(update, { id: 'r1', after_seconds: 60 })).code).toBe('invalid_rule')
+  })
+
   it('names the four tools', () => {
     expect(createScheduleTools({ telegram: { chatOf: () => undefined, turnOf: () => undefined, superAdmins: [] }, store, timeZone: 'UTC', maxPerChat: 1, changed: () => {} })
       .map(t => t.name)).toEqual(['schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete'])

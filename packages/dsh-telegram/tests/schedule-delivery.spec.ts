@@ -117,6 +117,43 @@ describe('startScheduler', () => {
     s.stop()
   })
 
+  it('re-reads each reminder before delivering it, so one removed mid-tick is skipped', async () => {
+    await add('a', { after_seconds: 60 })
+    await add('b', { after_seconds: 61 })
+    const send = api.sendMessage.bind(api)
+    api.sendMessage = async (chatId, text, options) => {
+      if (text.includes('Ta')) await store.update(list => list.splice(list.findIndex(r => r.record.id === 'b'), 1))
+      return send(chatId, text, options)
+    }
+    const s = scheduler()
+    now = NOW + 61_000
+    await s.tick()
+    expect(api.callsTo('sendMessage').map(c => c.args[1])).toEqual(['\u{23F0} Ta\npa'])
+    s.stop()
+  })
+
+  it('delivers once when a tick races a change', async () => {
+    await add('a', { after_seconds: 60 })
+    const s = scheduler()
+    now = NOW + 60_000
+    const ticking = s.tick()
+    s.changed()
+    await ticking
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(api.callsTo('sendMessage')).toHaveLength(1)
+    s.stop()
+  })
+
+  it('re-arms in steps when the next reminder is beyond the timer limit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    await add('far', { after_seconds: 30 * 86_400 })
+    const s = scheduler()
+    await vi.advanceTimersByTimeAsync(2_147_483_647)
+    expect(vi.getTimerCount()).toBe(1)
+    expect(api.callsTo('sendMessage')).toHaveLength(0)
+    s.stop()
+  })
+
   it('logs a failed send and keeps the next occurrence', async () => {
     await add('d', { daily: { time: '07:00:00' } })
     api.failNext('sendMessage', new Error('Forbidden: bot was kicked'))

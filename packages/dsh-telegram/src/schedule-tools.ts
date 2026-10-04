@@ -134,12 +134,14 @@ export function createScheduleTools(deps: ScheduleToolDeps): ToolDefinition[] {
       id: { type: 'string', required: true, description: 'Reminder id' },
       title: { type: 'string', description: 'New title' },
       prompt: { type: 'string', description: 'New message or instruction' },
-      after_seconds: { type: 'integer', description: 'Not accepted for updates' },
       ...UPDATE_TIMING,
     },
     output: JSON_OUTPUT,
     execute: (args, exec) => inChat(deps, exec, async (chatId, sender) => {
-      if (args.after_seconds !== undefined) throw new ReminderError('invalid_rule', 'after_seconds cannot be used to update a reminder; use at')
+      // Not in the schema, but the parameter root is open: reject it rather than silently keep the old timing.
+      if ((args as Record<string, unknown>).after_seconds !== undefined) {
+        throw new ReminderError('invalid_rule', 'after_seconds cannot be used to update a reminder; use at')
+      }
       const timing = timingOf(args as TimingInput)
       const changes = { ...(args.title === undefined ? {} : { title: args.title }), ...(args.prompt === undefined ? {} : { prompt: args.prompt }) }
       return commit(deps, (reminders) => {

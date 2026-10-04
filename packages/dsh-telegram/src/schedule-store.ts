@@ -28,6 +28,7 @@ function decodes(record: unknown): boolean {
 export class ReminderStore {
   private reminders: Reminder[] = []
   private queue: Promise<unknown> = Promise.resolve()
+  private closed = false
 
   constructor(private readonly file: string) {}
 
@@ -59,8 +60,14 @@ export class ReminderStore {
     return this.reminders
   }
 
+  /** Later updates reject without writing, so a store replaced by a reload cannot overwrite its successor's file. */
+  close(): void {
+    this.closed = true
+  }
+
   update<T>(change: (reminders: Reminder[]) => T): Promise<T> {
     const run = this.queue.then(async () => {
+      if (this.closed) throw new Error('reminder store is closed')
       const draft = [...this.reminders]
       const result = change(draft)
       await mkdir(dirname(this.file), { recursive: true })

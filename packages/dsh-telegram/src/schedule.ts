@@ -65,7 +65,7 @@ export function buildRecord(id: string, title: string, prompt: string, timing: T
 /** New title and prompt for a record whose timing stays; the same limits as creation. */
 export function retitle(record: ScheduleRecord, changes: { title?: string; prompt?: string }): ScheduleRecord {
   const title = changes.title?.trim() ?? record.title
-  const prompt = changes.prompt ?? record.prompt
+  const prompt = changes.prompt?.trim() ?? record.prompt
   if (title === '' || title.length > MAX_TITLE_LENGTH) throw new ReminderError('invalid_prompt', `title must be 1-${MAX_TITLE_LENGTH} characters`)
   if (prompt.trim() === '') throw new ReminderError('invalid_prompt', 'prompt must be non-empty')
   return { ...record, title, prompt }
@@ -108,8 +108,9 @@ export function reminderMessage(reminder: Reminder): string {
 
 const attribute = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
-/** The instruction an agent reminder submits as its turn's text. */
+/** The instruction an agent reminder submits as its turn's text; a closing tag inside the prompt cannot end the frame. */
 export function agentPrompt(reminder: Reminder): string {
+  const body = reminder.record.prompt.replace(/<\/scheduled_reminder/gi, '&lt;/scheduled_reminder')
   return `<scheduled_reminder title="${attribute(reminder.record.title)}" created_by="${attribute(reminder.creator.name)}">\n`
-    + `${reminder.record.prompt}\n</scheduled_reminder>`
+    + `${body}\n</scheduled_reminder>`
 }

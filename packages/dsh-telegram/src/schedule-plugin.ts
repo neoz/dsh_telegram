@@ -43,7 +43,10 @@ export function apply(ctx: Context, config: ScheduleConfig): void {
     // A corrupted file throws here: this fiber fails and the file stays as it was.
     store.load()
     const scheduler = startScheduler({ store, telegram: ctx.telegram, log })
-    ctx.effect(() => () => scheduler.stop(), 'dsh-telegram: reminder timer')
+    ctx.effect(() => () => {
+      scheduler.stop()
+      store.close()
+    }, 'dsh-telegram: reminder timer')
     const tools = createScheduleTools({
       telegram: ctx.telegram, store, timeZone: config.timeZone, maxPerChat: config.maxPerChat, changed: scheduler.changed,
     })

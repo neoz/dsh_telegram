@@ -79,6 +79,7 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
           await deliver(reminder.record.id)
         } catch (error) {
           failed = true
+          if (stopped) return
           log.warn(`dsh-telegram: chat ${reminder.chatId} reminder ${reminder.record.id} failed: ${errorText(error)}`)
         }
       }
