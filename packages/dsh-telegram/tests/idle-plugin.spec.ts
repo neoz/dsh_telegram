@@ -44,6 +44,10 @@ describe('idle Config', () => {
   })
 })
 
+/** `FiberState` is a const enum that Cordis does not export at runtime. */
+const ACTIVE = 2
+const FAILED = 3
+
 describe('idle plugin', () => {
   const A = -5
   const B = -6
@@ -100,11 +104,26 @@ describe('idle plugin', () => {
     expect(vi.getTimerCount()).toBe(baseline)
   })
 
-  it('starts no timer when disabled', async () => {
-    root.plugin(idlePlugin, { ...config, enabled: false })
+  it('loads but starts no timer when disabled', async () => {
+    const fiber = root.plugin(idlePlugin, { ...config, enabled: false })
     root.provide('telegram', service())
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await vi.waitFor(() => expect(fiber.state).toBe(ACTIVE))
     expect(vi.getTimerCount()).toBe(baseline)
+  })
+
+  it('rejects an invalid config at load, before the bot provides telegram', async () => {
+    const badZone = root.plugin(idlePlugin, { ...config, timezone: 'Mars/Olympus' })
+    const badChance = root.plugin(idlePlugin, { ...config, chance: 1.5 })
+    await vi.waitFor(() => expect([badZone.state, badChance.state]).toEqual([FAILED, FAILED]))
+  })
+
+  it('logs once that idle engagement is on', async () => {
+    const lines: string[] = []
+    root.logger.exporter({ levels: { default: 3 }, export: message => lines.push(String(message.args[0])) })
+    root.plugin(idlePlugin, config)
+    root.provide('telegram', service())
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(baseline + 1))
+    expect(lines.filter(line => line.includes('idle engagement on for 2 chat(s)'))).toHaveLength(1)
   })
 
   it('starts the scheduler once telegram is provided and skips a chat that just had a turn', async () => {

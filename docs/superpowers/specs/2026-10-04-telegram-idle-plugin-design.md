@@ -22,7 +22,7 @@ caps and log lines stay as they are.
 | Topic | Decision |
 |---|---|
 | Packaging | Same npm package, new sub-export `dsh-telegram/idle`, like `dsh-telegram/logger`. No new package. |
-| Coupling | The core provides a `telegram` service and emits `telegram/turn`; the idle plugin injects `telegram` and `llm`. |
+| Coupling | The core provides a `telegram` service and emits `telegram/turn`; the idle plugin waits for `telegram` and `llm` through `ctx.inject`. |
 | Lifecycle | The core provides `telegram` only once the bot is running and revokes it on stop. Cordis starts the idle plugin when both services are provided and disposes it on revoke. |
 | Toggle | `enabled` stays a config field of the idle plugin, so `TELEGRAM_IDLE_ENABLED` keeps its meaning. The row's `disabled` is not used. |
 | Environment | `TELEGRAM_IDLE_ENABLED` and `TELEGRAM_IDLE_CHATS` unchanged. |
@@ -67,7 +67,6 @@ declare module '@deepseek-ai/cordis' {
 
 ```ts
 export const name = 'dsh-telegram-idle'
-export const inject = ['telegram', 'llm']
 export interface IdleConfig { /* unchanged fields, moved from config.ts */ }
 export const Config: z<IdleConfig>
 export function apply(ctx: Context, config: IdleConfig): void
@@ -75,13 +74,19 @@ export function apply(ctx: Context, config: IdleConfig): void
 
 `apply`:
 
+The plugin itself injects nothing, so Cordis validates its config and runs
+`apply` at load, whether or not the bot ever starts (Cordis validates a
+plugin's config only right before running it, after its `inject` is met).
+
 1. Rejects an invalid `timezone` (`Intl.DateTimeFormat`), with the existing
    message `dsh-telegram: idle.timezone must be an IANA time zone, got ...`.
-2. Starts the scheduler with `startIdle({ config, provider, model, llm: ctx.llm, api, chatLog, queue, botId, botUsername, log })`,
+   A schema error (e.g. `chance` above 1) also fails the row at load.
+2. Returns when `enabled` is false.
+3. Calls `ctx.inject(['telegram', 'llm'], ...)`; inside, starts the scheduler with `startIdle({ config, provider, model, llm: ctx.llm, api, chatLog, queue, botId, botUsername, log })`,
    taking the values from `ctx.telegram`.
-3. Subscribes `ctx.on('telegram/turn', handle.noteTurn)`.
-4. Registers `handle.stop` through `ctx.effect`, so a bot reload or stop aborts
-   pending idle tasks and clears the timer.
+   subscribes `ctx.on('telegram/turn', handle.noteTurn)`.
+   and registers `handle.stop` through `ctx.effect`, so a bot reload or stop
+   aborts pending idle tasks and clears the timer.
 
 The logger is `ctx.logger('dsh-telegram')`, so log lines keep their
 `dsh-telegram:` prefix. `src/idle.ts` (pure logic and `startIdle`) is unchanged.
@@ -143,7 +148,9 @@ Checked with a probe against `@deepseek-ai/cordis` 4.0.4 while planning:
     not engage that chat);
   - revoking `telegram` stops the scheduler (timer cleared, pending task
     aborted);
-  - an invalid `timezone` is rejected.
+  - an invalid `timezone` or schema value fails the plugin at load, without
+    the telegram service;
+  - `enabled: false` loads the plugin but starts no timer.
 - `tests/config.spec.ts`: the four idle tests (defaults, partial overrides,
   chance above 1, unknown timezone) move to the idle plugin schema; the core
   `Config` no longer has `idle`.

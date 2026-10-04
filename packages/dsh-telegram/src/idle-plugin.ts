@@ -61,25 +61,29 @@ export function assertIdleConfig(config: IdleConfig): void {
 
 /** Cordis plugin name. */
 export const name = 'dsh-telegram-idle'
-/** Started by Cordis once the bot provides `telegram`, and disposed when it revokes it. */
-export const inject = ['telegram', 'llm']
-
+/**
+ * Injects nothing itself, so Cordis validates the config at load even when the bot never starts;
+ * the scheduler runs while the bot provides `telegram` and is disposed when it revokes it.
+ */
 export function apply(ctx: Context, config: IdleConfig): void {
   assertIdleConfig(config)
-  const logger = ctx.logger('dsh-telegram')
-  const { api, chatLog, queue, bot, selection } = ctx.telegram
-  const handle = startIdle({
-    config,
-    provider: selection.provider,
-    model: selection.model,
-    llm: ctx.llm,
-    api,
-    chatLog,
-    queue,
-    botId: bot.id,
-    botUsername: bot.username,
-    log: { info: msg => logger.info(msg), warn: msg => logger.warn(msg) },
+  if (!config.enabled) return
+  ctx.inject(['telegram', 'llm'], (ctx) => {
+    const logger = ctx.logger('dsh-telegram')
+    const { api, chatLog, queue, bot, selection } = ctx.telegram
+    const handle = startIdle({
+      config,
+      provider: selection.provider,
+      model: selection.model,
+      llm: ctx.llm,
+      api,
+      chatLog,
+      queue,
+      botId: bot.id,
+      botUsername: bot.username,
+      log: { info: msg => logger.info(msg), warn: msg => logger.warn(msg) },
+    })
+    ctx.on('telegram/turn', chatId => handle.noteTurn(chatId))
+    ctx.effect(() => () => handle.stop(), 'dsh-telegram: idle scheduler')
   })
-  ctx.on('telegram/turn', chatId => handle.noteTurn(chatId))
-  ctx.effect(() => () => handle.stop(), 'dsh-telegram: idle scheduler')
 }
