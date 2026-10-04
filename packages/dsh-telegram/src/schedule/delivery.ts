@@ -1,6 +1,6 @@
-import { afterDelivery, agentPrompt, dueReminders, nextDueAt, reminderMessage, type Reminder } from './schedule.ts'
-import type { ReminderStore } from './schedule-store.ts'
-import type { TelegramService } from './service.ts'
+import { afterDelivery, agentPrompt, dueReminders, nextDueAt, reminderMessage, type Reminder } from './domain.ts'
+import type { ReminderStore } from './store.ts'
+import type { TelegramService } from '../service.ts'
 
 /** Node keeps timers in a signed 32-bit millisecond field; longer waits are re-armed in steps. */
 const MAX_DELAY_MS = 2_147_483_647

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { decodeScheduleRecord } from '@deepseek-ai/dsh-schedule'
-import type { Reminder } from './schedule.ts'
+import type { Reminder } from './domain.ts'
 
 interface ScheduleFile { version: 1; reminders: Reminder[] }
 

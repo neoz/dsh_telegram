@@ -2,11 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatLog } from '../src/chatlog.ts'
-import { buildRecord, type Reminder } from '../src/schedule.ts'
-import { startScheduler } from '../src/schedule-delivery.ts'
-import { ReminderStore } from '../src/schedule-store.ts'
-import { FakeTelegramApi } from './helpers/fake-api.ts'
+import { ChatLog } from '../../src/chatlog.ts'
+import { buildRecord, type Reminder } from '../../src/schedule/domain.ts'
+import { startScheduler } from '../../src/schedule/delivery.ts'
+import { ReminderStore } from '../../src/schedule/store.ts'
+import { FakeTelegramApi } from '../helpers/fake-api.ts'
 
 const NOW = Date.parse('2026-10-04T01:00:00Z')
 let dir: string

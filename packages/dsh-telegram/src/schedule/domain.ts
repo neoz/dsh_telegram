@@ -3,7 +3,7 @@ import {
   createWeeklyScheduleRecord, isRecurringScheduleRecord, MAX_TITLE_LENGTH, resolveRecurringOccurrence, ScheduleId, ScheduleInputError,
   scheduleView, type ScheduleRecord,
 } from '@deepseek-ai/dsh-schedule'
-import type { TelegramUser } from './inbound.ts'
+import type { TelegramUser } from '../inbound.ts'
 
 export type ReminderMode = 'message' | 'agent'
 

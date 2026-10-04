@@ -1,8 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
-import { startIdle } from './idle.ts'
-import type {} from './service.ts'
+import { startIdle } from './engage.ts'
+import type {} from '../service.ts'
 
 /** Unprompted engagement in active groups; see the idle engagement spec. */
 export interface IdleConfig {

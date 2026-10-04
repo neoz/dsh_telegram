@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { buildRecord, type Reminder } from '../src/schedule.ts'
-import { ReminderStore } from '../src/schedule-store.ts'
+import { buildRecord, type Reminder } from '../../src/schedule/domain.ts'
+import { ReminderStore } from '../../src/schedule/store.ts'
 
 const NOW = Date.parse('2026-10-04T01:00:00Z')
 const one = (id: string): Reminder => ({

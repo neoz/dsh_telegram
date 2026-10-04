@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatLog, type ChatLogEntry } from '../src/chatlog.ts'
-import { Config, type IdleConfig } from '../src/idle-plugin.ts'
+import { ChatLog, type ChatLogEntry } from '../../src/chatlog.ts'
+import { Config, type IdleConfig } from '../../src/idle/index.ts'
 import {
   answeredIds, dayKey, decide, emptyIdleState, hourIn, IDLE_EMOJI, idleSystemPrompt, idleTranscript, parseDecision, pickableIds, shouldEngage, startIdle,
   type IdleDeps, type IdleState,
-} from '../src/idle.ts'
-import { FakeTelegramApi } from './helpers/fake-api.ts'
+} from '../../src/idle/engage.ts'
+import { FakeTelegramApi } from '../helpers/fake-api.ts'
 
 const base: IdleConfig = Config({ enabled: true, chatIds: [-5] })
 /** 12:00 in Asia/Ho_Chi_Minh (UTC+7). */

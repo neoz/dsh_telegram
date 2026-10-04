@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   afterDelivery, agentPrompt, buildRecord, canManage, displayName, dueReminders, nextDueAt, ReminderError, reminderMessage, reminderView, retitle,
   type Reminder,
-} from '../src/schedule.ts'
+} from '../../src/schedule/domain.ts'
 
 /** Sunday 08:00 in Asia/Ho_Chi_Minh. */
 const NOW = Date.parse('2026-10-04T01:00:00Z')

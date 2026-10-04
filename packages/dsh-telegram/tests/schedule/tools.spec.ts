@@ -2,9 +2,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { TurnContext } from '../src/sessions.ts'
-import { ReminderStore } from '../src/schedule-store.ts'
-import { createScheduleTools } from '../src/schedule-tools.ts'
+import type { TurnContext } from '../../src/sessions.ts'
+import { ReminderStore } from '../../src/schedule/store.ts'
+import { createScheduleTools } from '../../src/schedule/tools.ts'
 
 const NOW = Date.parse('2026-10-04T01:00:00Z')
 const admin = { id: 7, is_bot: false, username: 'ann', first_name: 'Ann' }

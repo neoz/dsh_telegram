@@ -76,12 +76,12 @@
       "default": "./lib/logger.js"
     },
     "./idle": {
-      "types": "./lib/idle-plugin.d.ts",
-      "default": "./lib/idle-plugin.js"
+      "types": "./lib/idle/index.d.ts",
+      "default": "./lib/idle/index.js"
     },
     "./schedule": {
-      "types": "./lib/schedule-plugin.d.ts",
-      "default": "./lib/schedule-plugin.js"
+      "types": "./lib/schedule/index.d.ts",
+      "default": "./lib/schedule/index.js"
     },
     "./package.json": "./package.json"
   }

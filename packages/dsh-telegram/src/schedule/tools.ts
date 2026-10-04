@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
-import type { TelegramUser } from './inbound.ts'
-import { buildRecord, canManage, displayName, ReminderError, reminderView, retitle, type Reminder, type ReminderMode, type TimingInput } from './schedule.ts'
-import type { ReminderStore } from './schedule-store.ts'
-import type { TelegramService } from './service.ts'
+import type { TelegramUser } from '../inbound.ts'
+import { buildRecord, canManage, displayName, ReminderError, reminderView, retitle, type Reminder, type ReminderMode, type TimingInput } from './domain.ts'
+import type { ReminderStore } from './store.ts'
+import type { TelegramService } from '../service.ts'
 
 export interface ScheduleToolDeps {
   telegram: Pick<TelegramService, 'chatOf' | 'turnOf' | 'superAdmins'>

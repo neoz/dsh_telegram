@@ -4,11 +4,11 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatLog } from '../src/chatlog.ts'
-import * as idlePlugin from '../src/idle-plugin.ts'
-import { assertIdleConfig, Config } from '../src/idle-plugin.ts'
-import type { TelegramService } from '../src/service.ts'
-import { FakeTelegramApi } from './helpers/fake-api.ts'
+import { ChatLog } from '../../src/chatlog.ts'
+import * as idlePlugin from '../../src/idle/index.ts'
+import { assertIdleConfig, Config } from '../../src/idle/index.ts'
+import type { TelegramService } from '../../src/service.ts'
+import { FakeTelegramApi } from '../helpers/fake-api.ts'
 
 describe('idle Config', () => {
   it('fills idle defaults with idle disabled', () => {

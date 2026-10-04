@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatLog } from '../src/chatlog.ts'
-import { buildRecord } from '../src/schedule.ts'
-import * as schedulePlugin from '../src/schedule-plugin.ts'
-import { Config } from '../src/schedule-plugin.ts'
-import type { TelegramService } from '../src/service.ts'
-import { FakeTelegramApi } from './helpers/fake-api.ts'
+import { ChatLog } from '../../src/chatlog.ts'
+import { buildRecord } from '../../src/schedule/domain.ts'
+import * as schedulePlugin from '../../src/schedule/index.ts'
+import { Config } from '../../src/schedule/index.ts'
+import type { TelegramService } from '../../src/service.ts'
+import { FakeTelegramApi } from '../helpers/fake-api.ts'
 
 /** `FiberState` is a const enum that Cordis does not export at runtime. */
 const ACTIVE = 2

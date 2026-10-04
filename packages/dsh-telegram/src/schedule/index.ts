@@ -2,11 +2,11 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
-import { nextDueAt } from './schedule.ts'
-import { startScheduler } from './schedule-delivery.ts'
-import { ReminderStore } from './schedule-store.ts'
-import { createScheduleTools } from './schedule-tools.ts'
-import type {} from './service.ts'
+import { nextDueAt } from './domain.ts'
+import { startScheduler } from './delivery.ts'
+import { ReminderStore } from './store.ts'
+import { createScheduleTools } from './tools.ts'
+import type {} from '../service.ts'
 
 export interface ScheduleConfig {
   /** Zone for daily, weekly and cron rules that name none. */
