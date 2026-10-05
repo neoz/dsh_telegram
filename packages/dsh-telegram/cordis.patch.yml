@@ -51,7 +51,8 @@
         idleMinutes: 10
         minNewMessages: 5
         chance: 1
-        maxPerBurst: 1
+        maxPerBurst: 2
+        slotGapMinutes: 30
         maxPerDay: 10
 
     - id: telegram-schedule

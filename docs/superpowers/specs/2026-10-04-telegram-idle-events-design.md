@@ -135,11 +135,14 @@ so it is tested without timers.
 | `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is how long nobody must have addressed the bot. |
 
 The bundle and profile rows set `idleMinutes: 10`, `minNewMessages: 5`,
-`chance: 1`, `maxPerBurst: 1` and `maxPerDay: 10`. Replaying about 20 days of
-three groups' chat logs, lively bursts (15+ messages, 2+ speakers) last 30-37
-minutes at the median. One certain slot per burst reached 95% of them in the
-idle group with about 3.5 LLM calls a day (at most 8), against 84% and 3.7 calls
-for `chance: 0.7` with two slots; the LLM's `skip` is what keeps the bot quiet.
+`chance: 1`, `maxPerBurst: 2`, `slotGapMinutes: 30` and `maxPerDay: 10`.
+Replaying 17-20 days of three groups' chat logs, lively bursts (15+ messages,
+2+ speakers) last 30-37 minutes at the median, and the first slot already
+reaches every lively burst the other checks allow. A second slot only matters
+for bursts that run for hours: 30 minutes apart it lands about 33 minutes after
+the first (9 of 15 bursts of an hour or more in the idle group), while 5 minutes
+apart it lands about 6 minutes after, mostly a second line on the same topic.
+The LLM's `skip` is what keeps the bot quiet.
 
 ## Decision log
 
