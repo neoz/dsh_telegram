@@ -130,14 +130,16 @@ so it is tested without timers.
 | `burstGapMinutes` | 15 | New, min 1. |
 | `maxPerBurst` | 1 | New, min 1. |
 | `slotGapMinutes` | 5 | New, min 1. Minimum gap between two slots of one burst. |
-| `chance` | 0.3 | Now per slot. The bundle and profile use 0.7. |
+| `chance` | 0.3 | Now per slot. The bundle and profile use 1. |
 | `checkIntervalMinutes` | removed | No timer. |
 | `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is how long nobody must have addressed the bot. |
 
 The bundle and profile rows set `idleMinutes: 10`, `minNewMessages: 5`,
-`chance: 0.7`, `maxPerBurst: 2` and `maxPerDay: 10`: a group with about one hot
-burst a day missed it half the time at `chance: 0.5` with one slot; two slots at
-0.7 join about 91% of bursts that last past `slotGapMinutes`.
+`chance: 1`, `maxPerBurst: 1` and `maxPerDay: 10`. Replaying about 20 days of
+three groups' chat logs, lively bursts (15+ messages, 2+ speakers) last 30-37
+minutes at the median. One certain slot per burst reached 95% of them in the
+idle group with about 3.5 LLM calls a day (at most 8), against 84% and 3.7 calls
+for `chance: 0.7` with two slots; the LLM's `skip` is what keeps the bot quiet.
 
 ## Decision log
 

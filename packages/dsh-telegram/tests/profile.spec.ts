@@ -43,7 +43,7 @@ describe('profile patch', () => {
       const config = telegramIdle(await rows(path))
       const { idleMinutes, minNewMessages, chance, maxPerBurst, maxPerDay } = config
       expect({ idleMinutes, minNewMessages, chance, maxPerBurst, maxPerDay })
-        .toEqual({ idleMinutes: 10, minNewMessages: 5, chance: 0.7, maxPerBurst: 2, maxPerDay: 10 })
+        .toEqual({ idleMinutes: 10, minNewMessages: 5, chance: 1, maxPerBurst: 1, maxPerDay: 10 })
     }
   })
 
@@ -73,7 +73,7 @@ describe('profile patch', () => {
       : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolve(v)])) : value)
     for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
       const config = Config(resolve(telegramIdle(await rows(path))))
-      expect(config).toMatchObject({ enabled: true, chatIds: [-100], hotWindowMinutes: 5, burstGapMinutes: 15, maxPerBurst: 2 })
+      expect(config).toMatchObject({ enabled: true, chatIds: [-100], hotWindowMinutes: 5, burstGapMinutes: 15, maxPerBurst: 1 })
       expect(config).not.toHaveProperty('checkIntervalMinutes')
     }
   })
