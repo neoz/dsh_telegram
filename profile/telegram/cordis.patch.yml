@@ -55,5 +55,7 @@
     chatIds: !!js (process.env.TELEGRAM_IDLE_CHATS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n !== 0)
     idleMinutes: 10
     minNewMessages: 5
-    chance: 0.5
+    chance: 0.7
+    maxPerBurst: 2
+    maxPerDay: 10
     persona: *persona

@@ -129,12 +129,14 @@ so it is tested without timers.
 | `hotWindowMinutes` | 5 | New, min 1. Also the window for pickable messages, replacing `checkIntervalMinutes`. |
 | `burstGapMinutes` | 15 | New, min 1. |
 | `maxPerBurst` | 1 | New, min 1. |
-| `chance` | 0.3 | Now per slot. The bundle and profile keep 0.5. |
+| `chance` | 0.3 | Now per slot. The bundle and profile use 0.7. |
 | `checkIntervalMinutes` | removed | No timer. |
 | `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is how long nobody must have addressed the bot, and also the minimum gap between two slots of one burst. |
 
-The bundle and profile rows (`idleMinutes: 10`, `minNewMessages: 5`,
-`chance: 0.5`) stay valid and need no change.
+The bundle and profile rows set `idleMinutes: 10`, `minNewMessages: 5`,
+`chance: 0.7`, `maxPerBurst: 2` and `maxPerDay: 10`: a group with about one hot
+burst a day missed it half the time at `chance: 0.5` with one slot; two slots at
+0.7 join about 91% of bursts that last past `idleMinutes`.
 
 ## Decision log
 
