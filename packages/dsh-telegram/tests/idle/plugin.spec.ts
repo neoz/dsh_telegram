@@ -21,6 +21,7 @@ describe('idle Config', () => {
       hotWindowMinutes: 5,
       burstGapMinutes: 15,
       maxPerBurst: 1,
+      slotGapMinutes: 5,
       maxPerDay: 5,
       quietHours: { from: 23, to: 7 },
       timezone: 'Asia/Ho_Chi_Minh',

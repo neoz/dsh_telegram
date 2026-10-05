@@ -23,7 +23,7 @@ a configuration choice (`maxPerBurst`).
 | Trigger | A new core event, `telegram/message`, fired for every line appended to a chat log. Idle evaluates on each human message. The interval timer goes away. |
 | Hot | At least `minNewMessages` human messages in the last `hotWindowMinutes`, from at least two different senders. Two is fixed, not configurable. |
 | Burst | A run of human messages with no gap longer than `burstGapMinutes`; a longer gap starts a new burst. |
-| Slots | `maxPerBurst` engagements per burst (default 1). A second slot also waits `idleMinutes` after the previous roll. |
+| Slots | `maxPerBurst` engagements per burst (default 1). A second slot also waits `slotGapMinutes` after the previous roll. |
 | Chance | Rolled once per slot. Hit or miss, the roll uses the slot; a slot leads to at most one LLM call, and an LLM `skip` uses it too. |
 | State | Kept in memory per allowlisted chat. Seeded from the chat log once at start, then fed by events. |
 | Unchanged | `maxPerDay`, quiet hours, the LLM prompt and output validation, the in-queue re-check, delivery, `telegram/turn`. |
@@ -105,7 +105,7 @@ On `telegram/message` for an allowlisted chat:
 | `one_speaker` | Enough messages, but from a single sender. |
 | `not_idle` | Someone addressed the bot within the last `idleMinutes` (`lastTurnAt`). The bot's own replies, idle reactions and reminder messages do not count. |
 | `burst_spent` | `burst.slotsUsed >= maxPerBurst`. |
-| `not_idle` (slot spacing) | A later slot rolled within `idleMinutes` of the previous roll, whether that one engaged, missed or was skipped. |
+| `slot_gap` | A later slot rolled within `slotGapMinutes` of the previous roll, whether that one engaged, missed or was skipped. |
 | `nothing_pickable` | No human message in the last `hotWindowMinutes` that the bot has not answered (`handled`, or the `reply_to` of a bot entry) or reacted to. |
 | `daily_cap` | `maxPerDay` engagements today, by calendar day in `timezone`. |
 | `quiet_hours` | The current hour in `timezone` is in `[quietHours.from, quietHours.to)`. |
@@ -129,14 +129,15 @@ so it is tested without timers.
 | `hotWindowMinutes` | 5 | New, min 1. Also the window for pickable messages, replacing `checkIntervalMinutes`. |
 | `burstGapMinutes` | 15 | New, min 1. |
 | `maxPerBurst` | 1 | New, min 1. |
+| `slotGapMinutes` | 5 | New, min 1. Minimum gap between two slots of one burst. |
 | `chance` | 0.3 | Now per slot. The bundle and profile use 0.7. |
 | `checkIntervalMinutes` | removed | No timer. |
-| `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is how long nobody must have addressed the bot, and also the minimum gap between two slots of one burst. |
+| `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is how long nobody must have addressed the bot. |
 
 The bundle and profile rows set `idleMinutes: 10`, `minNewMessages: 5`,
 `chance: 0.7`, `maxPerBurst: 2` and `maxPerDay: 10`: a group with about one hot
 burst a day missed it half the time at `chance: 0.5` with one slot; two slots at
-0.7 join about 91% of bursts that last past `idleMinutes`.
+0.7 join about 91% of bursts that last past `slotGapMinutes`.
 
 ## Decision log
 
@@ -174,7 +175,7 @@ burst a day missed it half the time at `chance: 0.5` with one slot; two slots at
   - each verdict in the table, including `one_speaker` and `burst_spent`;
   - a new burst after `burstGapMinutes`;
   - one chance roll per slot, a miss using the slot;
-  - `maxPerBurst: 2` allowing a second engagement after `idleMinutes` while
+  - `maxPerBurst: 2` allowing a second engagement after `slotGapMinutes` while
     the burst stays hot;
   - bot entries never trigger an evaluation.
 - Event-driven scheduler (fake queue, real `ChatLog` in a temp directory):

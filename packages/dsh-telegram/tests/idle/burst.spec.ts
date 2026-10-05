@@ -65,7 +65,7 @@ describe('evaluate', () => {
     expect(state.burst.slotsUsed).toBe(1)
   })
 
-  it('allows a second slot with maxPerBurst 2 once the bot has been idle for idleMinutes', () => {
+  it('allows a second slot with maxPerBurst 2 once slotGapMinutes has passed', () => {
     const config = { ...base, maxPerBurst: 2 }
     const state = stateWith(hot(), config)
     expect(evaluate(state, NOW, config, hit).verdict).toBe('go')
@@ -79,12 +79,23 @@ describe('evaluate', () => {
 })
 
 describe('slot spacing', () => {
-  it('waits idleMinutes between slots even when the first one missed', () => {
+  it('waits slotGapMinutes between slots even when the first one missed', () => {
     const config = { ...base, maxPerBurst: 2 }
     const state = stateWith(hot(), config)
     expect(evaluate(state, NOW, config, () => 0.9).verdict).toBe('chance_miss')
-    expect(evaluate(state, NOW + 0.1 * MIN, config, hit).verdict).toBe('not_idle')
+    expect(evaluate(state, NOW + 0.1 * MIN, config, hit).verdict).toBe('slot_gap')
     const later = NOW + 11 * MIN
+    for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) observe(state, human(20 + i, m, i % 2 === 0 ? 7 : 8, later), config)
+    expect(evaluate(state, later, config, hit).verdict).toBe('go')
+  })
+})
+
+describe('slot gap', () => {
+  it('spaces slots by slotGapMinutes, not idleMinutes', () => {
+    const config = { ...base, maxPerBurst: 2, idleMinutes: 10, slotGapMinutes: 5 }
+    const state = stateWith(hot(), config)
+    expect(evaluate(state, NOW, config, () => 0.9).verdict).toBe('chance_miss')
+    const later = NOW + 6 * MIN
     for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) observe(state, human(20 + i, m, i % 2 === 0 ? 7 : 8, later), config)
     expect(evaluate(state, later, config, hit).verdict).toBe('go')
   })

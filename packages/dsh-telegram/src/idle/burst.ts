@@ -5,7 +5,7 @@ const MINUTE_MS = 60_000
 /** A conversation needs at least two people; one person talking to themselves is not hot. */
 const MIN_SPEAKERS = 2
 
-export type CheckVerdict = 'go' | 'not_hot' | 'one_speaker' | 'not_idle' | 'burst_spent' | 'nothing_pickable' | 'daily_cap' | 'quiet_hours' | 'chance_miss'
+export type CheckVerdict = 'go' | 'not_hot' | 'one_speaker' | 'not_idle' | 'burst_spent' | 'slot_gap' | 'nothing_pickable' | 'daily_cap' | 'quiet_hours' | 'chance_miss'
 
 /** Per-chat idle state fed by chat-log lines; times are epoch milliseconds, `day` is the local `dayKey`. */
 export interface ChatIdleState {
@@ -14,7 +14,7 @@ export interface ChatIdleState {
    * `at` is when the line arrived (host clock) for live lines, or its logged time when seeded.
    */
   recent: Array<{ entry: ChatLogEntry; at: number }>
-  /** `lastSlotAt` is when the last slot was rolled, so a second slot waits `idleMinutes` even after a miss. */
+  /** `lastSlotAt` is when the last slot was rolled, so a second slot waits `slotGapMinutes` even after a miss. */
   burst: { since: number; lastHumanAt: number; slotsUsed: number; lastSlotAt: number }
   /** When someone last addressed the bot here; the bot is idle once this is `idleMinutes` old. */
   lastTurnAt: number
@@ -88,12 +88,11 @@ export function evaluate(state: ChatIdleState, now: number, config: IdleConfig, 
   const result = (verdict: CheckVerdict): Evaluation => ({ verdict, fresh, speakers, pickable })
   if (fresh < config.minNewMessages) return result('not_hot')
   if (speakers < MIN_SPEAKERS) return result('one_speaker')
-  const idle = config.idleMinutes * MINUTE_MS
   // Idle means nobody addressed the bot for idleMinutes; its own replies, reactions and reminders do not count.
-  if (now - state.lastTurnAt <= idle) return result('not_idle')
+  if (now - state.lastTurnAt <= config.idleMinutes * MINUTE_MS) return result('not_idle')
   if (roll && state.burst.slotsUsed >= config.maxPerBurst) return result('burst_spent')
-  // A later slot also waits idleMinutes after the previous roll, whether it engaged, missed or was skipped.
-  if (roll && state.burst.slotsUsed > 0 && now - state.burst.lastSlotAt <= idle) return result('not_idle')
+  // A later slot waits slotGapMinutes after the previous roll, whether it engaged, missed or was skipped.
+  if (roll && state.burst.slotsUsed > 0 && now - state.burst.lastSlotAt <= config.slotGapMinutes * MINUTE_MS) return result('slot_gap')
   if (pickable.size === 0) return result('nothing_pickable')
   const today = state.day === dayKey(now, config.timezone) ? state.count : 0
   if (today >= config.maxPerDay) return result('daily_cap')

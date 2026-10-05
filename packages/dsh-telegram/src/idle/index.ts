@@ -10,7 +10,7 @@ import type {} from '../service.ts'
 export interface IdleConfig {
   readonly enabled: boolean
   readonly chatIds: number[]
-  /** The bot is idle once nobody has addressed it for this long; also the minimum gap between two slots of a burst. */
+  /** The bot is idle once nobody has addressed it for this long. */
   readonly idleMinutes: number
   readonly minNewMessages: number
   readonly chance: number
@@ -20,6 +20,8 @@ export interface IdleConfig {
   readonly burstGapMinutes: number
   /** Engagements allowed per burst; each slot rolls `chance` once. */
   readonly maxPerBurst: number
+  /** Minimum gap between two slots of a burst, whether the earlier one engaged, missed or was skipped. */
+  readonly slotGapMinutes: number
   readonly maxPerDay: number
   readonly quietHours: { readonly from: number; readonly to: number }
   readonly timezone: string
@@ -36,6 +38,7 @@ const DEFAULT_IDLE: IdleConfig = {
   hotWindowMinutes: 5,
   burstGapMinutes: 15,
   maxPerBurst: 1,
+  slotGapMinutes: 5,
   maxPerDay: 5,
   quietHours: { from: 23, to: 7 },
   timezone: 'Asia/Ho_Chi_Minh',
@@ -52,6 +55,7 @@ export const Config: z<IdleConfig> = z.object({
   hotWindowMinutes: z.number().min(1).default(DEFAULT_IDLE.hotWindowMinutes),
   burstGapMinutes: z.number().min(1).default(DEFAULT_IDLE.burstGapMinutes),
   maxPerBurst: z.number().min(1).default(DEFAULT_IDLE.maxPerBurst),
+  slotGapMinutes: z.number().min(1).default(DEFAULT_IDLE.slotGapMinutes),
   maxPerDay: z.number().min(1).default(DEFAULT_IDLE.maxPerDay),
   quietHours: z.object({
     from: z.number().min(0).max(23).default(DEFAULT_IDLE.quietHours.from),
