@@ -23,7 +23,7 @@ session.
 | Action | The model chooses `react`, `reply` or `skip` from the recent chat log. |
 | LLM path | One-shot `ctx.llm.stream()` call with its own short system prompt. The chat's agent session is not touched, so its history and prompt cache stay intact. No tools. |
 | Persona | `idle.persona` in config; a neutral built-in sentence when empty. The deployment profile sets it with a YAML alias of the `system-prompt` row's `personaPrefix`, so there is one source of truth. `{{model}}` in it is replaced with `config.model`. `personaSuffix` (tool and memory instructions) is not used. |
-| Model | The bot's `provider` and `model` with `reasoningEffort: 'off'`: adapters default to thinking when no effort is given, which would spend the token budget before any JSON. |
+| Model | The bot's `provider` and `model` with `reasoningEffort: 'low'`: a little thinking lets the model work out what the group is talking about before it joins. |
 | Opt-in | `idle.enabled` (default `false`) and an explicit `idle.chatIds` allowlist. |
 | State | `lastEngagedAt` and a per-day counter per chat, in memory only. A restart resets them; the worst case is a few extra engagements that day. |
 | Reactions | A fixed set of 15 emoji that Telegram accepts from bots. Not configurable. |
@@ -139,12 +139,13 @@ reply to an older message right before answering that user.
 <group_messages>
 [12345] @ann (Ann): ...
 [12346] assistant: ...
-[12347] (open) @bob (Bob): ...
+[12347] (open) @bob (Bob) (reply to 12345): ...
 </group_messages>
 ```
 
 Each line goes through `oneLine` so a message cannot forge another line.
-`maxTokens` is 1024, leaving room for models that reason before answering.
+A line that replies to another carries `(reply to N)`, so the model can follow cross replies.
+`maxTokens` is 4096, since thinking counts toward it.
 
 Allowed emoji: 👍 ❤ 🔥 😁 🤣 🤔 👀 🎉 👏 💯 🙈 😎 🤩 🤗 🫡. In code they are written
 as `\u{...}` escapes, like `ACK_REACTION`.
