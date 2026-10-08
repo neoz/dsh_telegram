@@ -52,7 +52,7 @@
         minNewMessages: 5
         chance: 1
         maxPerBurst: 2
-        slotGapMinutes: 30
+        slotGapMinutes: 15
         maxPerDay: 24
 
     - id: telegram-schedule
