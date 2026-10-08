@@ -53,7 +53,7 @@
         chance: 1
         maxPerBurst: 2
         slotGapMinutes: 30
-        maxPerDay: 10
+        maxPerDay: 24
 
     - id: telegram-schedule
       name: dsh-telegram/schedule

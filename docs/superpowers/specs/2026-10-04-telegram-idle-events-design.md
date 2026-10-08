@@ -135,7 +135,7 @@ so it is tested without timers.
 | `enabled`, `chatIds`, `idleMinutes`, `minNewMessages`, `maxPerDay`, `quietHours`, `timezone`, `contextMessages`, `persona` | unchanged | `idleMinutes` is how long nobody must have addressed the bot. |
 
 The bundle and profile rows set `idleMinutes: 10`, `minNewMessages: 5`,
-`chance: 1`, `maxPerBurst: 2`, `slotGapMinutes: 30` and `maxPerDay: 10`.
+`chance: 1`, `maxPerBurst: 2`, `slotGapMinutes: 30` and `maxPerDay: 24`.
 Replaying 17-20 days of three groups' chat logs, lively bursts (15+ messages,
 2+ speakers) last 30-37 minutes at the median, and the first slot already
 reaches every lively burst the other checks allow. A second slot only matters

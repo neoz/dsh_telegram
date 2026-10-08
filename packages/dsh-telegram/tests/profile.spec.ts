@@ -43,7 +43,7 @@ describe('profile patch', () => {
       const config = telegramIdle(await rows(path))
       const { idleMinutes, minNewMessages, chance, maxPerBurst, slotGapMinutes, maxPerDay } = config
       expect({ idleMinutes, minNewMessages, chance, maxPerBurst, slotGapMinutes, maxPerDay })
-        .toEqual({ idleMinutes: 10, minNewMessages: 5, chance: 1, maxPerBurst: 2, slotGapMinutes: 30, maxPerDay: 10 })
+        .toEqual({ idleMinutes: 10, minNewMessages: 5, chance: 1, maxPerBurst: 2, slotGapMinutes: 30, maxPerDay: 24 })
     }
   })
 
