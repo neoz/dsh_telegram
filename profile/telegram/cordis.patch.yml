@@ -56,7 +56,7 @@
     idleMinutes: 10
     minNewMessages: 5
     chance: 1
-    maxPerBurst: 2
+    maxPerBurst: 4
     slotGapMinutes: 15
     maxPerDay: 24
     persona: *persona
