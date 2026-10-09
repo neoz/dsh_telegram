@@ -183,6 +183,57 @@ describe('startIdle', () => {
     ])
   })
 
+  it('shows the model the newest three photos in the context, skipping files that are gone', async () => {
+    const photo = async (id: number, minutesAgo: number, file: string | undefined): Promise<ChatLogEntry> => {
+      const path = join(dir, `${id}.jpg`)
+      if (file !== undefined) await writeFile(path, file)
+      return { ...human(id, minutesAgo), text: '[photo]', media: [path] }
+    }
+    const saved: string[][] = []
+    const saveImages = async (images: ReadonlyArray<{ data: Uint8Array }>) => {
+      saved.push(images.map(i => Buffer.from(i.data).toString()))
+      return images.map((_, i) => ({ attachmentId: `ref${saved.length}-${i}` }))
+    }
+    const idle = start(undefined, { saveImages })
+    await idle.ready
+    await say(idle, await photo(1, 4, 'one'))
+    await say(idle, await photo(2, 3, undefined))
+    await say(idle, await photo(3, 2, 'three'))
+    await say(idle, await photo(4, 1, 'four'))
+    await say(idle, { ...human(5, 0.5), media: [join(dir, 'notes.pdf')] })
+    await runQueued()
+    idle.stop()
+    // Photo 1 is fourth from the end, and photo 2's file was swept, so only 3 and 4 are read.
+    expect(saved).toEqual([['three', 'four']])
+    expect(calls[0]!.messages[0]!.content.slice(1)).toEqual([
+      { type: 'text', text: '[photo of message 3]' },
+      { type: 'image', attachment: { attachmentId: 'ref1-0' } },
+      { type: 'text', text: '[photo of message 4]' },
+      { type: 'image', attachment: { attachmentId: 'ref1-1' } },
+    ])
+    expect(decisions()).toEqual([{ action: 'reply', messageId: 5, text: 'hehe' }])
+  })
+
+  it('decides from text alone when the call with photos fails', async () => {
+    const path = join(dir, 'p.jpg')
+    await writeFile(path, 'jpeg')
+    const picky = {
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        if (options.messages[0]!.content.some(b => b.type === 'image')) throw new Error('model takes text only')
+        yield { type: 'text-delta', index: 0, text: '{"action":"skip"}' }
+        yield { type: 'finish', reason: { kind: 'stop' } } as never
+      },
+    }
+    const idle = start('', { llm: picky, saveImages: async images => images.map(() => ({ attachmentId: 'ref' })) })
+    await idle.ready
+    for (const [i, m] of [4, 3, 2, 1].entries()) await say(idle, human(i + 1, m))
+    await say(idle, { ...human(5, 0.5), text: '[photo]', media: [path] })
+    await runQueued()
+    idle.stop()
+    expect(warns.some(m => m.includes('with photos failed') && m.includes('model takes text only'))).toBe(true)
+    expect(decisions()).toEqual([{ action: 'skip' }])
+  })
+
   it('a corrupted chat log in one chat leaves the others working', async () => {
     const OTHER = -6
     await mkdir(join(dir, 'log'), { recursive: true })

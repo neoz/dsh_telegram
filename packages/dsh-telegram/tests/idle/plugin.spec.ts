@@ -81,6 +81,7 @@ describe('idle plugin', () => {
     // The core wires the chat log to telegram/message the same way.
     chatLog = new ChatLog(join(dir, 'log'), (chatId, entry) => root.emit('telegram/message', chatId, entry))
     root.provide('llm', { async *stream(): AsyncIterable<StreamChunk> { yield { type: 'finish', reason: { kind: 'stop' } } as never } })
+    root.provide('attachments', { saveImages: async () => [] } as never)
   })
   afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 

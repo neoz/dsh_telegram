@@ -1,6 +1,7 @@
 import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
 import { startIdle, type IdleEvent } from './scheduler.ts'
@@ -84,7 +85,7 @@ export const name = 'dsh-telegram-idle'
 export function apply(ctx: Context, config: IdleConfig): void {
   assertIdleConfig(config)
   if (!config.enabled) return
-  ctx.inject(['telegram', 'llm'], (ctx) => {
+  ctx.inject(['telegram', 'llm', 'attachments'], (ctx) => {
     const logger = ctx.logger('dsh-telegram')
     const file = join(ctx.telegram.dataDir, 'idle-decisions.jsonl')
     // Appends run one after another so lines keep their order; a failed write only warns.
@@ -100,6 +101,7 @@ export function apply(ctx: Context, config: IdleConfig): void {
       provider: selection.provider,
       model: selection.model,
       llm: ctx.llm,
+      saveImages: images => ctx.attachments.saveImages(images),
       api,
       chatLog,
       queue,

@@ -1,7 +1,10 @@
+import { readFile } from 'node:fs/promises'
+import { extname } from 'node:path'
+import type { ImageStore } from '../bot.ts'
 import type { ChatLog, ChatLogEntry } from '../chatlog.ts'
 import type { TelegramApi } from '../telegram-api.ts'
 import { dayKey, emptyChatState, evaluate, observe, type ChatIdleState, type CheckVerdict, type Evaluation } from './burst.ts'
-import { decide, idleSystemPrompt, type IdleAction, type IdleLlm } from './engage.ts'
+import { decide, idleSystemPrompt, type IdleAction, type IdleLlm, type IdlePhoto } from './engage.ts'
 import type { IdleConfig } from './index.ts'
 
 /** One line of the decision log, so missed conversations can be explained afterwards. */
@@ -27,6 +30,8 @@ export interface IdleDeps {
   log: { info(msg: string): void; warn(msg: string): void }
   now?: () => number
   random?: () => number
+  /** Admits context photos as attachments; without it the model sees only the `[photo]` text. */
+  saveImages?: ImageStore['saveImages']
   /** Receives every start, check and decision; the plugin appends them to a JSONL file. */
   record?: (event: IdleEvent) => void
 }
@@ -42,6 +47,8 @@ export interface IdleHandle {
 
 const IDLE_TIMEOUT_MS = 60_000
 const MAX_REACTED = 50
+/** Newest context photos shown to the model; older ones stay `[photo]` text. */
+const MAX_PHOTOS = 3
 /** Each roll is its own event, so these are logged even when they repeat. */
 const ROLLED: ReadonlySet<CheckVerdict> = new Set(['go', 'chance_miss'])
 
@@ -79,6 +86,24 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     })
   }
 
+  /** Reads the newest saved photos of the context; a file swept by retention is left out. */
+  const photos = async (chatId: number, entries: readonly ChatLogEntry[]): Promise<IdlePhoto[]> => {
+    if (deps.saveImages === undefined) return []
+    const wanted = entries
+      .flatMap(e => (e.media ?? []).filter(path => extname(path).toLowerCase() === '.jpg').map(path => ({ messageId: e.message_id, path })))
+      .slice(-MAX_PHOTOS)
+    const read = await Promise.all(wanted.map(async w => readFile(w.path).then(data => [{ messageId: w.messageId, data }], () => [])))
+    const found = read.flat()
+    if (found.length === 0) return []
+    try {
+      const refs = await deps.saveImages(found.map(f => ({ data: f.data, mediaType: 'image/jpeg' as const })))
+      return found.map((f, i) => ({ messageId: f.messageId, attachment: refs[i] }))
+    } catch (error) {
+      log.warn(`dsh-telegram: chat ${chatId} idle photos could not be admitted: ${errorText(error)}`)
+      return []
+    }
+  }
+
   const engage = async (chatId: number, state: ChatIdleState): Promise<void> => {
     if (lifetime.signal.aborted) return
     // Re-check without rolling or needing a slot: the bot may have been addressed while this task waited.
@@ -87,15 +112,20 @@ export function startIdle(deps: IdleDeps): IdleHandle {
       record({ event: 'decision', chatId, action: 'cancelled' })
       return
     }
+    const context = state.recent.slice(-config.contextMessages).map(e => e.entry)
+    const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDLE_TIMEOUT_MS)])
+    const ask = (shown: readonly IdlePhoto[]) => decide(deps.llm, context, { provider: deps.provider, model: deps.model, system, pickable: recheck.pickable, photos: shown, signal })
     let action: IdleAction
     try {
-      action = await decide(deps.llm, state.recent.slice(-config.contextMessages).map(e => e.entry), {
-        provider: deps.provider,
-        model: deps.model,
-        system,
-        pickable: recheck.pickable,
-        signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDLE_TIMEOUT_MS)]),
-      })
+      const shown = await photos(chatId, context)
+      try {
+        action = await ask(shown)
+      } catch (error) {
+        // A model or route that refuses images still gets to decide from the text.
+        if (shown.length === 0 || lifetime.signal.aborted) throw error
+        log.warn(`dsh-telegram: chat ${chatId} idle decision with photos failed, retrying without them: ${errorText(error)}`)
+        action = await ask([])
+      }
     } catch (error) {
       if (!lifetime.signal.aborted) {
         log.warn(`dsh-telegram: chat ${chatId} idle decision failed: ${errorText(error)}`)
