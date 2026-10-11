@@ -57,6 +57,6 @@
     minNewMessages: 5
     chance: 1
     maxPerBurst: 4
-    slotGapMinutes: 15
+    slotGapMinutes: 10
     maxPerDay: 24
     persona: *persona
