@@ -19,6 +19,14 @@ describe('downloadFile', () => {
     expect(fetch).toHaveBeenCalledTimes(3)
   })
 
+  it('cancels the body of a response it retries past', async () => {
+    const busy = new Response('busy', { status: 503 })
+    const cancel = vi.spyOn(busy.body!, 'cancel')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(busy).mockResolvedValueOnce(new Response('img')))
+    await createGrammyApi(bot, 'T', retry).downloadFile('f')
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
   it('gives up after the last attempt', async () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError('fetch failed'))
     vi.stubGlobal('fetch', fetch)
