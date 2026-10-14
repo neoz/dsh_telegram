@@ -1,6 +1,19 @@
 # Minimal SearXNG configuration for the dsh-telegram web_search provider.
 # server.secret_key comes from the SEARXNG_SECRET environment variable.
-use_default_settings: true
+use_default_settings:
+  # The other default general engines (duckduckgo, brave, wikipedia, google, qwant) answer a
+  # self-hosted instance with CAPTCHAs or access denied, which only adds timeouts and noise.
+  engines:
+    keep_only:
+      - google cse
+      - bing
+      - yandex
+
+engines:
+  - name: bing
+    disabled: false
+  - name: yandex
+    disabled: false
 
 server:
   # Only reachable from the compose network; the bot-filter/limiter needs Redis and is not wanted here.
