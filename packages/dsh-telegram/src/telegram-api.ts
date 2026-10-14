@@ -1,4 +1,5 @@
 import { GrammyError, HttpError, InputFile, type Bot } from 'grammy'
+import type { RetryConfig } from './config.ts'
 
 export interface ReplyTarget { readonly messageId: number }
 export interface SendTextOptions { readonly parseMode?: 'HTML'; readonly replyTo?: ReplyTarget }
@@ -42,7 +43,22 @@ async function wrap<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
-export function createGrammyApi(bot: Bot, token: string): TelegramApi {
+/** Fetches with exponential backoff on network failures, 429 and 5xx; the last attempt's outcome is returned as is. */
+async function fetchWithRetry(url: string, retry: RetryConfig): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await fetch(url)
+      const transient = response.status === 429 || response.status >= 500
+      if (!transient || attempt >= retry.maxAttempts) return response
+    } catch (error) {
+      if (attempt >= retry.maxAttempts) throw error
+    }
+    const delay = Math.min(retry.startDelayMs * 2 ** (attempt - 1), retry.maxDelayMs)
+    await new Promise(resolve => setTimeout(resolve, delay))
+  }
+}
+
+export function createGrammyApi(bot: Bot, token: string, retry: RetryConfig): TelegramApi {
   const api = bot.api
   return {
     sendMessage: (chatId, text, options = {}) => wrap(async () => {
@@ -83,7 +99,7 @@ export function createGrammyApi(bot: Bot, token: string): TelegramApi {
     downloadFile: fileId => wrap(async () => {
       const file = await api.getFile(fileId)
       if (file.file_path === undefined) throw new TelegramApiError(`file ${fileId} has no file_path`)
-      const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`)
+      const response = await fetchWithRetry(`https://api.telegram.org/file/bot${token}/${file.file_path}`, retry)
       if (!response.ok) throw new TelegramApiError(`download failed: ${response.status}`, response.status)
       return { data: Buffer.from(await response.arrayBuffer()), filePath: file.file_path }
     }),

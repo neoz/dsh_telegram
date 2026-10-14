@@ -52,7 +52,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     maxDelaySeconds: config.retry.maxDelayMs / 1000,
   }))
   await bot.init()
-  const api = createGrammyApi(bot, config.botToken)
+  const api = createGrammyApi(bot, config.botToken, config.retry)
 
   const chatLog = new ChatLog(join(config.dataDir, 'chatlog'), forwardAppends((chatId, entry) => ctx.emit('telegram/message', chatId, entry), log.warn))
   const memory = new MemoryStore(join(config.dataDir, 'memory'), config.memory)
