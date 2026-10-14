@@ -50,6 +50,8 @@ async function fetchWithRetry(url: string, retry: RetryConfig): Promise<Response
       const response = await fetch(url)
       const transient = response.status === 429 || response.status >= 500
       if (!transient || attempt >= retry.maxAttempts) return response
+      // Release the discarded response's connection before retrying.
+      await response.body?.cancel()
     } catch (error) {
       if (attempt >= retry.maxAttempts) throw error
     }
