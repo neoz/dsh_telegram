@@ -15,6 +15,9 @@ server {
         # Stream responses as they arrive and allow long generations.
         proxy_buffering off;
         proxy_read_timeout 600s;
+        # Stream request bodies upstream too; Messages payloads routinely exceed the in-memory
+        # body buffer, which made nginx spill every request to a temp file on the SD card.
+        proxy_request_buffering off;
     }
 
     location / {
