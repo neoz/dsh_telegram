@@ -27,7 +27,7 @@ services:
 
   # Self-hosted metasearch behind web_search; not published outside the compose network.
   searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng:2026.10.2-19ffbcd30
     environment:
       SEARXNG_SECRET: ${SEARXNG_SECRET}
       SEARXNG_BASE_URL: http://searxng:8080/
