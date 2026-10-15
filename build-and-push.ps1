@@ -1,29 +1,35 @@
 # build-and-push.ps1
-# Build the dsh-telegram image (linux/arm64) tagged :latest and push it to GitHub Container Registry (ghcr.io)
+# Build the dsh-telegram and dsh-zalo images (linux/arm64) tagged :latest and push them to GitHub Container Registry (ghcr.io).
+# -Target telegram or -Target zalo builds only that one.
 
 param(
     [string]$Registry = "ghcr.io",
     [string]$Owner = "neoz",
-    [string]$ImageName = "dsh-telegram",
-    [string]$Dockerfile = "docker/Dockerfile",
+    [ValidateSet("all", "telegram", "zalo")]
+    [string]$Target = "all",
     [switch]$NoPush
 )
 
 $ErrorActionPreference = "Stop"
 
+$Images = @(
+    @{ Name = "telegram"; Image = "dsh-telegram"; Dockerfile = "docker/Dockerfile" },
+    @{ Name = "zalo"; Image = "dsh-zalo"; Dockerfile = "docker/zalo.Dockerfile" }
+) | Where-Object { $Target -eq "all" -or $_.Name -eq $Target }
+
 # Ensure QEMU is set up for cross-platform builds
 Write-Host "Setting up QEMU for cross-platform builds ..." -ForegroundColor Cyan
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes >$null
 
-$FullImage = "$Registry/$Owner/${ImageName}:latest"
-
-Write-Host "Building $FullImage ..." -ForegroundColor Cyan
-
-docker buildx build --platform linux/arm64 --provenance=false -f $Dockerfile -t $FullImage --load .
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Build failed." -ForegroundColor Red
-    exit 1
+# Build everything first, so a failed build never leaves the registry with only some images updated.
+foreach ($entry in $Images) {
+    $FullImage = "$Registry/$Owner/$($entry.Image):latest"
+    Write-Host "Building $FullImage ..." -ForegroundColor Cyan
+    docker buildx build --platform linux/arm64 --provenance=false -f $entry.Dockerfile -t $FullImage --load .
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Build of $FullImage failed." -ForegroundColor Red
+        exit 1
+    }
 }
 
 if ($NoPush) {
@@ -33,7 +39,7 @@ if ($NoPush) {
 
 # Login to ghcr.io if not already authenticated
 $ErrorActionPreference = "Continue"
-$loginCheck = docker pull "$Registry/$Owner/${ImageName}:nonexistent" 2>&1
+$loginCheck = docker pull "$Registry/$Owner/$($Images[0].Image):nonexistent" 2>&1
 $ErrorActionPreference = "Stop"
 if ($loginCheck -match "unauthorized" -or $loginCheck -match "denied") {
     Write-Host "Logging in to $Registry ..." -ForegroundColor Cyan
@@ -49,12 +55,13 @@ if ($loginCheck -match "unauthorized" -or $loginCheck -match "denied") {
     }
 }
 
-Write-Host "Pushing $FullImage ..." -ForegroundColor Cyan
-docker push $FullImage
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Push failed." -ForegroundColor Red
-    exit 1
+foreach ($entry in $Images) {
+    $FullImage = "$Registry/$Owner/$($entry.Image):latest"
+    Write-Host "Pushing $FullImage ..." -ForegroundColor Cyan
+    docker push $FullImage
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Push of $FullImage failed." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Done: $FullImage" -ForegroundColor Green
 }
-
-Write-Host "Done: $FullImage" -ForegroundColor Green
