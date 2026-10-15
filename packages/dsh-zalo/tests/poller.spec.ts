@@ -49,6 +49,14 @@ describe('startPolling', () => {
     await poller.stop()
   })
 
+  it('waits between polls that return at once with nothing new, so it never hammers the API', async () => {
+    const api = { getUpdates: vi.fn(async () => [update('same')]) }
+    const poller = startPolling({ api, timeoutSec: 30, onUpdate: () => {}, backoff: { startDelayMs: 0, maxDelayMs: 0 }, log, minPollIntervalMs: 100 })
+    await new Promise(resolve => setTimeout(resolve, 250))
+    await poller.stop()
+    expect(api.getUpdates.mock.calls.length).toBeLessThanOrEqual(4)
+  })
+
   it('stop() aborts the pending long poll and resolves promptly', async () => {
     const api = scripted([])
     const poller = startPolling({ api, timeoutSec: 30, onUpdate: () => {}, backoff: { startDelayMs: 0, maxDelayMs: 0 }, log })

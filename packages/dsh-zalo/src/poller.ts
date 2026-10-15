@@ -22,6 +22,8 @@ export interface PollerOptions {
   backoff: { startDelayMs: number; maxDelayMs: number }
   log: { warn(msg: string): void; error(msg: string): void }
   seenLimit?: number
+  /** A poll that yields nothing new sooner than this is followed by a pause, in case Zalo answers without holding the request. */
+  minPollIntervalMs?: number
 }
 
 export interface Poller { stop(): Promise<void> }
@@ -37,9 +39,12 @@ export function startPolling(options: PollerOptions): Poller {
     abort.signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
   })
 
+  const minPollIntervalMs = options.minPollIntervalMs ?? 1000
   const loop = (async () => {
     let failures = 0
     while (!abort.signal.aborted) {
+      const startedAt = Date.now()
+      let delivered = 0
       let updates: ZaloUpdate[]
       try {
         updates = await options.api.getUpdates(options.timeoutSec, abort.signal)
@@ -59,12 +64,15 @@ export function startPolling(options: PollerOptions): Poller {
           continue
         }
         if (!seen.add(id)) continue
+        delivered++
         try {
           options.onUpdate(update)
         } catch (error) {
           options.log.error(`dsh-zalo: update handler failed: ${message(error)}`)
         }
       }
+      const elapsed = Date.now() - startedAt
+      if (delivered === 0 && elapsed < minPollIntervalMs) await sleep(minPollIntervalMs - elapsed)
     }
   })()
 
