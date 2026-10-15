@@ -203,7 +203,9 @@ async function sendMarkdownDocument(options: TurnOptions, markdown: string, html
 export async function runTurn(options: TurnOptions): Promise<TurnResult> {
   const { api, agent, chatId, log } = options
   const now = options.now ?? Date.now
-  await api.sendChatAction(chatId, 'typing')
+  await api.sendChatAction(chatId, 'typing').catch((error: unknown) => {
+    log.warn(`dsh-telegram: typing indicator failed (${String(error)})`)
+  })
   const placeholderId = (await api.sendMessage(chatId, options.status.thinking, { ...replyTarget(options.replyToMessageId) })).messageId
   const placeholder = new Placeholder(api, chatId, placeholderId, options.statusEditIntervalMs, now, options.status.thinking)
 

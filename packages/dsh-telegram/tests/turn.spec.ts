@@ -56,6 +56,15 @@ function options(agentParts: ReturnType<typeof fakeAgent>, extra: Partial<TurnOp
 }
 
 describe('runTurn', () => {
+  it('still answers when the typing indicator fails', async () => {
+    const warns: string[] = []
+    api.failNext('sendChatAction', new Error('typing down'))
+    const a = fakeAgent(emit => { emit(turnStart); emit(reply('ok')); emit(turnEnd({ kind: 'completed' })) })
+    const result = await runTurn(options(a, { log: { warn: m => warns.push(m), error: () => {} } }))
+    expect(result.outcome).toBe('edited')
+    expect(warns.some(w => w.includes('typing down'))).toBe(true)
+  })
+
   it('sends a reply placeholder, then edits it into the rendered answer', async () => {
     const a = fakeAgent(emit => { emit(turnStart); emit(reply('**done**')); emit(turnEnd({ kind: 'completed' })) })
     const result = await runTurn(options(a))

@@ -210,7 +210,10 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
     api: deps.api, inboxDir: join(workspaceDir, 'inbox'), botId: deps.botId, botUsername: deps.botUsername,
   })
   await deps.chatLog.append(chatId, { ...inbound.logEntry, handled: true })
-  await deps.api.setReaction(chatId, message.message_id, ACK_REACTION)
+  // The reaction is a courtesy; a chat with reactions disabled must still get its answer.
+  await deps.api.setReaction(chatId, message.message_id, ACK_REACTION).catch((error: unknown) => {
+    deps.log.warn(`dsh-telegram: chat ${chatId} acknowledgement reaction failed (${String(error)})`)
+  })
 
   const { result, prepMs } = await runChatTurn(deps, {
     chatId,

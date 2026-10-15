@@ -123,6 +123,15 @@ describe('handleMessage', () => {
     expect(followups).toHaveLength(2)
   })
 
+  it('still runs the turn when the acknowledgement reaction fails', async () => {
+    const warns: string[] = []
+    deps.log = { ...deps.log, warn: m => warns.push(m) }
+    api.failNext('setReaction', new Error('reactions disabled'))
+    await handleMessage(msg({ text: 'hi' }), deps)
+    expect(followups).toHaveLength(1)
+    expect(warns.some(w => w.includes('reactions disabled'))).toBe(true)
+  })
+
   it('ignores strangers in DMs without logging', async () => {
     await handleMessage(msg({ text: 'hi', from: bob }), deps)
     expect(api.calls).toHaveLength(0)
