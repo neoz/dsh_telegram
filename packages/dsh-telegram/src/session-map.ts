@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { SerialQueue, writeJsonAtomic } from './json-file.ts'
 
 export interface ChatSessionRecord {
   sessionId: string
@@ -9,6 +9,7 @@ export interface ChatSessionRecord {
 /** `chat_id -> session` map persisted as one JSON file, rewritten atomically. */
 export class SessionMap {
   private records = new Map<number, ChatSessionRecord>()
+  private readonly writes = new SerialQueue()
 
   constructor(private readonly file: string) {}
 
@@ -38,10 +39,8 @@ export class SessionMap {
     await this.flush()
   }
 
-  private async flush(): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true })
-    const tmp = `${this.file}.tmp`
-    await writeFile(tmp, JSON.stringify(Object.fromEntries(this.records), null, 2), 'utf8')
-    await rename(tmp, this.file)
+  /** Chats flush concurrently; each queued write snapshots the map when it runs, so the last one holds every change. */
+  private flush(): Promise<void> {
+    return this.writes.run(() => writeJsonAtomic(this.file, Object.fromEntries(this.records)))
   }
 }

@@ -76,6 +76,13 @@ describe('MemoryStore', () => {
       entries: [{ id: 1, text: 'x', ts: expect.any(String) }],
     })
   })
+
+  it('serialises concurrent saves so no entry is lost and ids stay unique', async () => {
+    const store = new MemoryStore(dir, { ...limits, maxGlobalEntries: 20 })
+    const saved = await Promise.all(Array.from({ length: 10 }, (_, i) => store.save(global, `fact ${i}`)))
+    expect(new Set(saved.map(e => e.id)).size).toBe(10)
+    expect(await store.list(global)).toHaveLength(10)
+  })
 })
 
 describe('formatMemoryEntry / renderMemoryBlock', () => {

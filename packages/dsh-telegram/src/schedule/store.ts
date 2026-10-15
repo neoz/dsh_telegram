@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
 import { decodeScheduleRecord } from '@deepseek-ai/dsh-schedule'
+import { writeJsonAtomic } from '../json-file.ts'
 import type { Reminder } from './domain.ts'
 
 interface ScheduleFile { version: 1; reminders: Reminder[] }
@@ -70,11 +69,8 @@ export class ReminderStore {
       if (this.closed) throw new Error('reminder store is closed')
       const draft = [...this.reminders]
       const result = change(draft)
-      await mkdir(dirname(this.file), { recursive: true })
-      const tmp = `${this.file}.tmp`
       const data: ScheduleFile = { version: 1, reminders: draft }
-      await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
-      await rename(tmp, this.file)
+      await writeJsonAtomic(this.file, data)
       this.reminders = draft
       return result
     })

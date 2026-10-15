@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { oneLine } from './chatlog.ts'
+import { SerialQueue, writeJsonAtomic } from './json-file.ts'
 
 /** `chat` is the memory of one conversation (a private chat or a group); `global` is shared by every chat. */
 export type MemoryScope = { kind: 'chat'; chatId: number } | { kind: 'global' }
@@ -22,6 +23,9 @@ export function formatMemoryEntry(entry: MemoryEntry): string {
 
 /** One small JSON file per scope under `dir`, rewritten atomically on every change; nothing is cached. */
 export class MemoryStore {
+  /** Chats share the global file, so every read-modify-write runs one at a time. */
+  private readonly changes = new SerialQueue()
+
   constructor(private readonly dir: string, private readonly limits: MemoryLimits) {}
 
   private file(scope: MemoryScope): string {
@@ -41,12 +45,8 @@ export class MemoryStore {
     }
   }
 
-  private async write(scope: MemoryScope, data: MemoryFile): Promise<void> {
-    await mkdir(this.dir, { recursive: true })
-    const target = this.file(scope)
-    const tmp = `${target}.tmp`
-    await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
-    await rename(tmp, target)
+  private write(scope: MemoryScope, data: MemoryFile): Promise<void> {
+    return writeJsonAtomic(this.file(scope), data)
   }
 
   async list(scope: MemoryScope): Promise<MemoryEntry[]> {
@@ -60,6 +60,10 @@ export class MemoryStore {
     if (trimmed.length > this.limits.maxEntryChars) {
       throw new Error(`entry is ${trimmed.length} characters, the limit is ${this.limits.maxEntryChars}; shorten it`)
     }
+    return this.changes.run(() => this.saveTrimmed(scope, trimmed, replaceId))
+  }
+
+  private async saveTrimmed(scope: MemoryScope, trimmed: string, replaceId: number | undefined): Promise<MemoryEntry> {
     const data = await this.read(scope)
     const ts = new Date().toISOString()
     if (replaceId !== undefined) {
@@ -81,12 +85,14 @@ export class MemoryStore {
     return entry
   }
 
-  async forget(scope: MemoryScope, id: number): Promise<void> {
-    const data = await this.read(scope)
-    const index = data.entries.findIndex(e => e.id === id)
-    if (index === -1) throw new Error(`no memory entry #${id}`)
-    data.entries.splice(index, 1)
-    await this.write(scope, data)
+  forget(scope: MemoryScope, id: number): Promise<void> {
+    return this.changes.run(async () => {
+      const data = await this.read(scope)
+      const index = data.entries.findIndex(e => e.id === id)
+      if (index === -1) throw new Error(`no memory entry #${id}`)
+      data.entries.splice(index, 1)
+      await this.write(scope, data)
+    })
   }
 }
 

@@ -35,4 +35,15 @@ describe('SessionMap', () => {
     await map.set(1, { sessionId: 's1', lastTurnMessageId: 0 })
     expect(map.get(1)?.sessionId).toBe('s1')
   })
+
+  it('serialises concurrent writes so every record lands and no temp file is left', async () => {
+    const file = join(dir, 'map.json')
+    const a = new SessionMap(file)
+    await a.load()
+    await Promise.all(Array.from({ length: 20 }, (_, i) => a.set(i, { sessionId: `s${i}`, lastTurnMessageId: i })))
+    const b = new SessionMap(file)
+    await b.load()
+    for (let i = 0; i < 20; i++) expect(b.get(i)?.sessionId).toBe(`s${i}`)
+    expect(await readdir(dir)).toEqual(['map.json'])
+  })
 })
