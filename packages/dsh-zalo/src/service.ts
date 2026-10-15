@@ -8,7 +8,7 @@ export interface ZaloService {
   readonly chatLog: ChatLog
   /** Per-chat queue shared with message handling; tasks of one chat never overlap. */
   readonly queue: Pick<Dispatcher, 'enqueue' | 'isBusy'>
-  readonly bot: { readonly id: string; readonly accountName: string }
+  readonly bot: { readonly id: string; readonly accountName: string; readonly displayName?: string }
   /** Where plugins keep their own durable files. */
   readonly dataDir: string
   /** Chat whose live agent has this id; undefined for subagents and unknown sessions. */

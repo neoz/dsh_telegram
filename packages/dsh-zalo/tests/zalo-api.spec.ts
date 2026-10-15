@@ -16,8 +16,8 @@ describe('createZaloApi', () => {
   })
 
   it('maps getMe fields', async () => {
-    const api = createZaloApi('T', retry, (async () => json({ ok: true, result: { id: 'b1', account_name: 'dshbot' } })) as never)
-    expect(await api.getMe()).toEqual({ id: 'b1', accountName: 'dshbot' })
+    const api = createZaloApi('T', retry, (async () => json({ ok: true, result: { id: 'b1', account_name: 'dshbot', display_name: 'Bot Trợ Lý SI' } })) as never)
+    expect(await api.getMe()).toEqual({ id: 'b1', accountName: 'dshbot', displayName: 'Bot Trợ Lý SI' })
   })
 
   it('normalises getUpdates to an array', async () => {

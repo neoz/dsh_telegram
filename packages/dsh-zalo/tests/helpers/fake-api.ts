@@ -26,7 +26,7 @@ export class FakeZaloApi implements ZaloApi {
 
   async getMe() {
     this.record('getMe', [])
-    return { id: 'bot1', accountName: 'dshbot' }
+    return { id: 'bot1', accountName: 'dshbot', displayName: 'Dsh Bot' }
   }
   async getUpdates(timeoutSec: number): Promise<ZaloUpdate[]> {
     this.record('getUpdates', [timeoutSec])

@@ -161,6 +161,12 @@ describe('handleMessage', () => {
     expect(agents.reset).toHaveBeenCalledTimes(1)
   })
 
+  it('answers a group message that mentions the bot by its display name', async () => {
+    deps = { ...deps, bot: { id: 'bot1', accountName: 'bot.RzYkSoYo', displayName: 'Bot Trợ Lý SI' } }
+    await handleMessage(upd('chào @Bot Trợ Lý SI', 'GROUP'), deps)
+    expect(api.callsTo('sendMessage')[0]!.args.slice(0, 2)).toEqual(['g1', 'answer'])
+  })
+
   it('accepts a command addressed to the bot in a group', async () => {
     await handleMessage(upd('@dshbot /help', 'GROUP'), deps)
     expect(api.callsTo('sendMessage')[0]!.args[1]).toMatch(/^\/reset/)

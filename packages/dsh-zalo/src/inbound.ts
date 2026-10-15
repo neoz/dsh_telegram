@@ -16,7 +16,8 @@ export interface InboundMessage {
   logEntry: ChatLogEntry
 }
 
-export interface TriggerOptions { accountName: string; groupPrefix: string }
+/** Zalo writes a mention as `@` plus the bot's display name; `@accountName` is accepted too. */
+export interface TriggerOptions { accountName: string; displayName?: string; groupPrefix: string }
 
 const DOWNLOAD_FAILED = '[image could not be downloaded]'
 
@@ -29,22 +30,28 @@ const MARKERS: Record<string, string> = {
 }
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const mentionPattern = (accountName: string) => new RegExp(`@${escapeRegExp(accountName)}`, 'gi')
+/** The longer name is tried first, so a display name with spaces is matched whole. */
+const mentionPattern = (options: TriggerOptions) => {
+  const names = [options.displayName, options.accountName]
+    .filter((name): name is string => name !== undefined && name !== '')
+    .sort((a, b) => b.length - a.length)
+  return new RegExp(`@(?:${names.map(escapeRegExp).join('|')})`, 'gi')
+}
 const prefixPattern = (prefix: string) => new RegExp(`^\\s*${escapeRegExp(prefix)}(?=\\s|$)`, 'i')
 
 export function bodyText(message: ZaloMessage): string {
   return [message.text, message.caption].filter((t): t is string => t !== undefined && t !== '').join('\n')
 }
 
-/** A group message addresses the bot when it mentions `@accountName` or starts with the prefix word. */
+/** A group message addresses the bot when it mentions the bot or starts with the prefix word. */
 export function hasTrigger(text: string, options: TriggerOptions): boolean {
-  return mentionPattern(options.accountName).test(text) || prefixPattern(options.groupPrefix).test(text)
+  return mentionPattern(options).test(text) || prefixPattern(options.groupPrefix).test(text)
 }
 
 export function stripTrigger(text: string, options: TriggerOptions): string {
   return text
     .replace(prefixPattern(options.groupPrefix), '')
-    .replace(mentionPattern(options.accountName), '')
+    .replace(mentionPattern(options), '')
     .replace(/[ \t]+/g, ' ')
     .trim()
 }

@@ -29,6 +29,12 @@ describe('triggers', () => {
     expect(hasTrigger('/asking what', trig)).toBe(false)
     expect(hasTrigger('plain talk', trig)).toBe(false)
   })
+  it('matches the display name Zalo inserts for a mention, as seen in a real group', () => {
+    const named = { ...trig, displayName: 'Bot Trợ Lý SI' }
+    expect(hasTrigger('chào @Bot Trợ Lý SI', named)).toBe(true)
+    expect(stripTrigger('chào @Bot Trợ Lý SI', named)).toBe('chào')
+    expect(hasTrigger('chào @Bot Trợ Lý', named)).toBe(false)
+  })
   it('strips the mention and the prefix', () => {
     expect(stripTrigger('hey @DSHBOT  what', trig)).toBe('hey what')
     expect(stripTrigger('/ask what is up', trig)).toBe('what is up')

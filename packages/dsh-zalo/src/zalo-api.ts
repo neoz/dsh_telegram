@@ -45,7 +45,7 @@ function normalizeUpdate(update: ZaloUpdate): ZaloUpdate {
 
 /** The Bot API surface the plugin needs; tests substitute a recorder. */
 export interface ZaloApi {
-  getMe(): Promise<{ id: string; accountName: string }>
+  getMe(): Promise<{ id: string; accountName: string; displayName?: string }>
   /** Long-polls for updates; resolves `[]` when the poll times out empty. */
   getUpdates(timeoutSec: number, signal?: AbortSignal): Promise<ZaloUpdate[]>
   sendMessage(chatId: string, text: string, options?: { parseMode?: 'markdown' }): Promise<{ messageId: string }>
@@ -131,9 +131,9 @@ export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: type
 
   return {
     async getMe() {
-      const me = await call<{ id: string; account_name: string }>('getMe', {})
+      const me = await call<{ id: string; account_name: string; display_name?: string }>('getMe', {})
       if (me === undefined) throw new ZaloApiError('getMe failed: no result')
-      return { id: me.id, accountName: me.account_name }
+      return { id: me.id, accountName: me.account_name, ...(me.display_name === undefined ? {} : { displayName: me.display_name }) }
     },
     async getUpdates(timeoutSec, signal) {
       try {

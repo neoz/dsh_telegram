@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
 import type { Config } from './config.ts'
-import { bodyText, hasTrigger, logEntryFor, parseInbound, stripTrigger } from './inbound.ts'
+import { bodyText, hasTrigger, logEntryFor, parseInbound, stripTrigger, type TriggerOptions } from './inbound.ts'
 import type { ImageMediaType } from './media.ts'
 import { renderMemoryBlock, type MemoryStore } from './memory.ts'
 import type { SeenIds } from './poller.ts'
@@ -23,7 +23,7 @@ export interface BotDeps {
   memory: MemoryStore
   agents: ChatAgents
   attachments: ImageStore
-  bot: { id: string; accountName: string }
+  bot: { id: string; accountName: string; displayName?: string }
   log: { info(msg: string): void; warn(msg: string): void; error(msg: string): void }
   /** Called when a message is about to get a turn (not for commands or log-only messages). */
   noteTurn?: (chatId: string) => void
@@ -36,7 +36,7 @@ export function isAllowed(user: ZaloUser, allowFrom: readonly string[]): boolean
   return allowFrom.some(entry => entry.trim() === user.id)
 }
 
-export function gate(update: ZaloUpdate, options: { allowFrom: readonly string[]; botId: string; accountName: string; groupPrefix: string }): GateVerdict {
+export function gate(update: ZaloUpdate, options: TriggerOptions & { allowFrom: readonly string[]; botId: string }): GateVerdict {
   const { message } = update
   const sender = message.from
   if (sender === undefined || sender.is_bot === true || sender.id === options.botId) return 'ignore'
@@ -54,12 +54,18 @@ export function commandOf(text: string): Command | undefined {
   return match === null ? undefined : match[1] as Command
 }
 
+/** How group messages address this bot. */
+const triggerOf = (deps: BotDeps): TriggerOptions => ({
+  accountName: deps.bot.accountName,
+  ...(deps.bot.displayName === undefined ? {} : { displayName: deps.bot.displayName }),
+  groupPrefix: deps.config.groupPrefix,
+})
+
 /** Super admins are always allowed: their commands and global-memory rights would be useless otherwise. */
 const gateOptions = (deps: BotDeps) => ({
   allowFrom: [...deps.config.allowFrom, ...deps.config.superAdmins],
   botId: deps.bot.id,
-  accountName: deps.bot.accountName,
-  groupPrefix: deps.config.groupPrefix,
+  ...triggerOf(deps),
 })
 
 /** Commands are for super admins only; anyone else sending `/stop` gets an ordinary turn. */
@@ -125,7 +131,7 @@ export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<
   const lagMs = Math.max(0, receivedAt - update.message.date)
   const inbound = await parseInbound(update, {
     api: deps.api, inboxDir: join(deps.agents.workspaceFor(chatId), 'inbox'), log: deps.log,
-    accountName: deps.bot.accountName, groupPrefix: deps.config.groupPrefix,
+    ...triggerOf(deps),
   })
   await deps.chatLog.append(chatId, { ...inbound.logEntry, handled: true })
 
