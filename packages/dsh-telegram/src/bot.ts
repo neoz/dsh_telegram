@@ -129,7 +129,7 @@ ${text}`
   }
 
   const prepMs = Date.now() - input.startedAt
-  if (memoryText !== undefined) deps.agents.markMemoryInjected(chatId, sessionId)
+  if (memoryText !== undefined) await deps.agents.markMemoryInjected(chatId, sessionId)
   const workspaceDir = deps.agents.workspaceFor(chatId)
   const result = await runTurn({
     api: deps.api,

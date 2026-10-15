@@ -4,6 +4,8 @@ import { SerialQueue, writeJsonAtomic } from './json-file.ts'
 export interface ChatSessionRecord {
   sessionId: string
   lastTurnMessageId: number
+  /** Set once the memory block is in this session's history; a resumed session must not get it again. */
+  memoryInjected?: true
 }
 
 /** `chat_id -> session` map persisted as one JSON file, rewritten atomically. */

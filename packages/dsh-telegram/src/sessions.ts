@@ -36,8 +36,6 @@ export interface TurnContext { sender: TelegramUser; isGroup: boolean }
 export class ChatAgents {
   private readonly handles = new Map<number, AgentHandle>()
   private readonly turns = new Map<number, TurnContext>()
-  /** Session id that already received the memory block, per chat. */
-  private readonly injected = new Map<number, string>()
 
   constructor(private readonly options: ChatAgentsOptions) {}
 
@@ -72,11 +70,14 @@ export class ChatAgents {
   }
 
   memoryInjected(chatId: number, sessionId: string): boolean {
-    return this.injected.get(chatId) === sessionId
+    const record = this.options.map.get(chatId)
+    return record?.sessionId === sessionId && record.memoryInjected === true
   }
 
-  markMemoryInjected(chatId: number, sessionId: string): void {
-    this.injected.set(chatId, sessionId)
+  async markMemoryInjected(chatId: number, sessionId: string): Promise<void> {
+    const record = this.options.map.get(chatId)
+    if (record?.sessionId !== sessionId) return
+    await this.options.map.set(chatId, { ...record, memoryInjected: true })
   }
 
   async resolve(chatId: number): Promise<ResolvedAgent> {
@@ -141,7 +142,6 @@ export class ChatAgents {
     const handle = this.handles.get(chatId)
     this.handles.delete(chatId)
     this.turns.delete(chatId)
-    this.injected.delete(chatId)
     await this.options.map.delete(chatId)
     if (handle === undefined) return
     // Let a running turn wind down (and deliver its "Stopped.") before the agent goes away.

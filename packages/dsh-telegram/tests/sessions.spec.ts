@@ -151,20 +151,30 @@ describe('ChatAgents', () => {
 
   it('tracks memory injection per chat and session', async () => {
     const { agents } = await build()
-    expect(agents.memoryInjected(1, 's1')).toBe(false)
-    agents.markMemoryInjected(1, 's1')
-    expect(agents.memoryInjected(1, 's1')).toBe(true)
-    expect(agents.memoryInjected(1, 's2')).toBe(false)
-    expect(agents.memoryInjected(2, 's1')).toBe(false)
+    const id = String((await agents.resolve(1)).agent.id)
+    await agents.resolve(2)
+    expect(agents.memoryInjected(1, id)).toBe(false)
+    await agents.markMemoryInjected(1, id)
+    expect(agents.memoryInjected(1, id)).toBe(true)
+    expect(agents.memoryInjected(1, 'other')).toBe(false)
+    expect(agents.memoryInjected(2, id)).toBe(false)
+  })
+
+  it('remembers memory injection across a restart', async () => {
+    const first = await build()
+    const id = String((await first.agents.resolve(1)).agent.id)
+    await first.agents.markMemoryInjected(1, id)
+    const second = await build()
+    expect(second.agents.memoryInjected(1, id)).toBe(true)
   })
 
   it('reset forgets the turn and injection records', async () => {
     const { agents } = await build()
-    await agents.resolve(1)
+    const id = String((await agents.resolve(1)).agent.id)
     agents.setTurn(1, { sender: { id: 7, is_bot: false, first_name: 'Ann' }, isGroup: false })
-    agents.markMemoryInjected(1, 's1')
+    await agents.markMemoryInjected(1, id)
     await agents.reset(1)
     expect(agents.turnOf(1)).toBeUndefined()
-    expect(agents.memoryInjected(1, 's1')).toBe(false)
+    expect(agents.memoryInjected(1, id)).toBe(false)
   })
 })
