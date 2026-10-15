@@ -45,8 +45,11 @@ const POLL_TIMEOUT_CODE = 408
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-/** Fetches with exponential backoff on network failures, 429 and 5xx; the last attempt's outcome is returned as is. */
-async function fetchWithRetry(retry: RetryConfig, attempt: () => Promise<Response>, signal?: AbortSignal): Promise<Response> {
+/**
+ * Fetches with exponential backoff on 429 and 5xx, and on network failures unless `retryThrown` is false;
+ * the last attempt's outcome is returned as is.
+ */
+async function fetchWithRetry(retry: RetryConfig, attempt: () => Promise<Response>, signal?: AbortSignal, retryThrown = true): Promise<Response> {
   for (let n = 1; ; n++) {
     try {
       const response = await attempt()
@@ -55,7 +58,7 @@ async function fetchWithRetry(retry: RetryConfig, attempt: () => Promise<Respons
       // Release the discarded response's connection before retrying.
       await response.body?.cancel()
     } catch (error) {
-      if (n >= retry.maxAttempts || signal?.aborted === true) throw error
+      if (!retryThrown || n >= retry.maxAttempts || signal?.aborted === true) throw error
     }
     await sleep(Math.min(retry.startDelayMs * 2 ** (n - 1), retry.maxDelayMs))
   }
@@ -64,13 +67,14 @@ async function fetchWithRetry(retry: RetryConfig, attempt: () => Promise<Respons
 interface Envelope<T> { ok?: boolean; result?: T; error_code?: number; description?: string }
 
 export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: typeof fetch = fetch): ZaloApi {
-  const call = async <T>(method: string, body: object, timeoutMs = REQUEST_TIMEOUT_MS, signal?: AbortSignal): Promise<T | undefined> => {
+  /** `idempotent: false` never retries a thrown error: the request may have reached Zalo before the connection failed. */
+  const call = async <T>(method: string, body: object, timeoutMs = REQUEST_TIMEOUT_MS, signal?: AbortSignal, idempotent = true): Promise<T | undefined> => {
     const response = await fetchWithRetry(retry, () => fetchImpl(`${ZALO_API_BASE}/bot${token}/${method}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
       signal: signal === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
-    }), signal)
+    }), signal, idempotent)
     const payload = await response.json().catch(() => undefined) as Envelope<T> | undefined
     if (payload?.ok !== true) {
       throw new ZaloApiError(`${method} failed: ${payload?.description ?? `HTTP ${response.status}`}`, payload?.error_code ?? response.status)
@@ -99,7 +103,7 @@ export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: type
         chat_id: chatId,
         text,
         ...(options.parseMode === undefined ? {} : { parse_mode: options.parseMode }),
-      })
+      }, REQUEST_TIMEOUT_MS, undefined, false)
       return { messageId: sent?.message_id ?? '' }
     },
     async sendChatAction(chatId, action) {

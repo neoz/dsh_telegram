@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runTurn, startTyping, type TurnOptions } from '../src/turn.ts'
+import { ZaloApiError } from '../src/zalo-api.ts'
 import { FakeZaloApi } from './helpers/fake-api.ts'
 
 /** Agent whose followup appends one turn's events; `hang` leaves the turn open until cancelled. */
@@ -43,7 +44,7 @@ describe('runTurn', () => {
 
   it('resends a chunk Zalo rejects as plain text', async () => {
     const api = new FakeZaloApi()
-    api.failNext('sendMessage', new Error('bad markdown'))
+    api.failNext('sendMessage', new ZaloApiError('sendMessage failed: bad markdown', 400))
     const result = await runTurn(options(api, fakeAgent({ text: '| a | b |' })))
     expect(api.callsTo('sendMessage').map(c => c.args[2])).toEqual([{ parseMode: 'markdown' }, undefined])
     expect(result.outcome).toBe('sent')
@@ -51,11 +52,19 @@ describe('runTurn', () => {
 
   it('reports undelivered when plain text fails too', async () => {
     const api = new FakeZaloApi()
-    api.failNext('sendMessage', new Error('a'))
-    api.failNext('sendMessage', new Error('b'))
+    api.failNext('sendMessage', new ZaloApiError('a', 400))
+    api.failNext('sendMessage', new ZaloApiError('b', 400))
     const result = await runTurn(options(api, fakeAgent({ text: 'x' })))
     expect(result.outcome).toBe('undelivered')
     expect(log.error).toHaveBeenCalled()
+  })
+
+  it('does not resend as plain text after a network error, so the user never gets the reply twice', async () => {
+    const api = new FakeZaloApi()
+    api.failNext('sendMessage', new TypeError('fetch failed'))
+    const result = await runTurn(options(api, fakeAgent({ text: 'x' })))
+    expect(api.callsTo('sendMessage')).toHaveLength(1)
+    expect(result.outcome).toBe('undelivered')
   })
 
   it('still replies when typing fails', async () => {

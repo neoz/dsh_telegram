@@ -35,14 +35,30 @@ describe('createZaloApi', () => {
     expect(await api.getUpdates(30)).toEqual([])
   })
 
-  it('retries 5xx and network errors, then succeeds', async () => {
+  it('retries idempotent calls on 5xx and network errors, then succeeds', async () => {
     const fetchImpl = vi.fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockResolvedValueOnce(json({}, 502))
+      .mockResolvedValueOnce(json({ ok: true, result: { id: 'b1', account_name: 'dshbot' } }))
+    const api = createZaloApi('T', retry, fetchImpl as never)
+    expect(await api.getMe()).toEqual({ id: 'b1', accountName: 'dshbot' })
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries sendMessage when Zalo answers 5xx, since nothing was delivered', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({}, 503))
       .mockResolvedValueOnce(json({ ok: true, result: { message_id: 'm2' } }))
     const api = createZaloApi('T', retry, fetchImpl as never)
     expect(await api.sendMessage('c', 'x')).toEqual({ messageId: 'm2' })
-    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('never resends a message after a network error, since Zalo may already have delivered it', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('fetch failed'))
+    const api = createZaloApi('T', retry, fetchImpl as never)
+    await expect(api.sendMessage('c', 'x')).rejects.toThrow('fetch failed')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
   it('throws ZaloApiError on ok:false without leaking the token', async () => {

@@ -1,7 +1,7 @@
 import { createUserMessage, type ContentBlock, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
 import { splitMessage } from './render.ts'
-import type { ZaloApi } from './zalo-api.ts'
+import { ZaloApiError, type ZaloApi } from './zalo-api.ts'
 
 /** Structural slice of dsh's Agent used by the runner (the real Agent satisfies it). */
 export interface TurnAgent {
@@ -82,11 +82,18 @@ export function startTyping(api: ZaloApi, chatId: string, intervalMs: number, lo
   return () => clearInterval(timer)
 }
 
-/** Sends one chunk as markdown, then as plain text if Zalo rejects the markup; undefined when both fail. */
+/** Zalo answered and refused the request; anything else may have been delivered, so resending risks a duplicate. */
+const isRejection = (error: unknown) => error instanceof ZaloApiError && error.code !== undefined && error.code >= 400 && error.code < 500 && error.code !== 429
+
+/** Sends one chunk as markdown, then as plain text if Zalo rejects the markup; undefined when it is not delivered. */
 async function sendPart(api: ZaloApi, chatId: string, part: string, log: TurnOptions['log']): Promise<string | undefined> {
   try {
     return (await api.sendMessage(chatId, part, { parseMode: 'markdown' })).messageId
   } catch (error) {
+    if (!isRejection(error)) {
+      log.error(`dsh-zalo: send failed in chat ${chatId} (${String(error)})`)
+      return undefined
+    }
     log.warn(`dsh-zalo: markdown send rejected in chat ${chatId} (${String(error)}); retrying as plain text`)
   }
   try {
