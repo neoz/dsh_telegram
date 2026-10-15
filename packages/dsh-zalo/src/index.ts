@@ -4,11 +4,11 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-tools'
-import { createDispatcher } from './bot.ts'
+import { createDispatcher, type Dispatcher } from './bot.ts'
 import { ChatLog, type ChatLogEntry } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
 import { MemoryStore } from './memory.ts'
-import { startPolling, type Poller } from './poller.ts'
+import { SeenIds, startPolling, type Poller } from './poller.ts'
 import { sweepOldFiles } from './retention.ts'
 import type { ZaloService } from './service.ts'
 import { SessionMap } from './session-map.ts'
@@ -25,7 +25,7 @@ export const name = 'dsh-zalo'
 /** Services required before the bot starts. */
 export const inject = ['agents', 'tools', 'attachments', 'loader']
 
-interface Started { poller: Poller; agents: ChatAgents; service: ZaloService }
+interface Started { poller: Poller; dispatcher: Dispatcher; agents: ChatAgents; service: ZaloService }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -75,6 +75,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     bot: me,
     log,
     noteTurn: chatId => ctx.emit('zalo/turn', chatId),
+    strangers: new SeenIds(1000),
   })
   const poller = startPolling({
     api,
@@ -86,6 +87,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   log.info(`dsh-zalo: polling as ${me.accountName}`)
   return {
     poller,
+    dispatcher,
     agents,
     service: {
       api,
@@ -165,6 +167,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {
     const cancel = retryStart(() => start(ctx, config), (result) => {
       if (stopped) {
+        result.dispatcher.close()
         void result.poller.stop().then(() => result.agents.disposeAll())
         return
       }
@@ -178,11 +181,13 @@ export function apply(ctx: Context, config: Config): void {
       stopped = true
       cancel()
       if (started === undefined) return
-      const { poller, agents } = started
+      const { poller, dispatcher, agents } = started
       started = undefined
       // Dependants stop first, while the bot can still serve their last calls.
       revoke?.()
       revoke = undefined
+      // Queued messages would resolve agents that disposeAll is about to drop.
+      dispatcher.close()
       void poller.stop().then(() => agents.disposeAll())
     }
   }, 'dsh-zalo: bot runner')

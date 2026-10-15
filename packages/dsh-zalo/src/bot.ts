@@ -5,6 +5,7 @@ import type { Config } from './config.ts'
 import { bodyText, hasTrigger, logEntryFor, parseInbound, stripTrigger } from './inbound.ts'
 import type { ImageMediaType } from './media.ts'
 import { renderMemoryBlock, type MemoryStore } from './memory.ts'
+import type { SeenIds } from './poller.ts'
 import type { ChatAgents } from './sessions.ts'
 import { runTurn } from './turn.ts'
 import { isGroupChat, type ZaloApi, type ZaloUpdate, type ZaloUser } from './zalo-api.ts'
@@ -26,6 +27,8 @@ export interface BotDeps {
   log: { info(msg: string): void; warn(msg: string): void; error(msg: string): void }
   /** Called when a message is about to get a turn (not for commands or log-only messages). */
   noteTurn?: (chatId: string) => void
+  /** Senders already logged as not allowed; each is logged once. Without it every message is logged. */
+  strangers?: SeenIds
 }
 
 /** Ids only: Zalo display names are chosen by the sender and prove nothing. */
@@ -51,8 +54,12 @@ export function commandOf(text: string): Command | undefined {
   return match === null ? undefined : match[1] as Command
 }
 
+/** Super admins are always allowed: their commands and global-memory rights would be useless otherwise. */
 const gateOptions = (deps: BotDeps) => ({
-  allowFrom: deps.config.allowFrom, botId: deps.bot.id, accountName: deps.bot.accountName, groupPrefix: deps.config.groupPrefix,
+  allowFrom: [...deps.config.allowFrom, ...deps.config.superAdmins],
+  botId: deps.bot.id,
+  accountName: deps.bot.accountName,
+  groupPrefix: deps.config.groupPrefix,
 })
 
 /** Commands are for super admins only; anyone else sending `/stop` gets an ordinary turn. */
@@ -97,7 +104,7 @@ export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<
   const sender = update.message.from
   if (verdict === 'ignore') {
     // Zalo ids are opaque, so this line is how an operator learns the id to put in allowFrom.
-    if (!isGroupChat(update.message.chat) && sender !== undefined && sender.is_bot !== true) {
+    if (!isGroupChat(update.message.chat) && sender !== undefined && sender.is_bot !== true && (deps.strangers?.add(sender.id) ?? true)) {
       deps.log.info(`dsh-zalo: ignored a private message from ${sender.id} (${sender.display_name ?? ''}), who is not in allowFrom`)
     }
     return
@@ -177,22 +184,27 @@ export interface Dispatcher {
   enqueue(chatId: string, task: () => Promise<void>): void
   /** Whether the chat has a running or waiting task. */
   isBusy(chatId: string): boolean
+  /** Stops accepting work; queued tasks that have not started are skipped, a running one finishes. */
+  close(): void
 }
 
 /**
- * Serialises message handling per chat so turns never overlap; commands bypass
- * the queue so `/stop` and `/reset` act on the turn that is running. A failing
- * task is logged and never blocks the next one.
+ * Serialises message handling per chat so turns never overlap. `/stop` and `/help`
+ * bypass the queue so they act on the turn that is running; `/reset` cancels that
+ * turn at once but waits its turn to dispose the agent, so no queued message runs
+ * on a disposed one. A failing task is logged and never blocks the next one.
  */
 export function createDispatcher(deps: BotDeps): Dispatcher {
   const chains = new Map<string, Promise<void>>()
+  let closed = false
   const report = (update: ZaloUpdate) => (error: unknown) => {
     deps.log.error(`dsh-zalo: message ${update.message.message_id} in chat ${update.message.chat.id} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
   }
   const enqueue = (chatId: string, task: () => Promise<void>): void => {
+    if (closed) return
     const previous = chains.get(chatId) ?? Promise.resolve()
     const next = previous
-      .then(task)
+      .then(() => (closed ? undefined : task()))
       .catch((error: unknown) => {
         deps.log.error(`dsh-zalo: queued task in chat ${chatId} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
       })
@@ -203,13 +215,19 @@ export function createDispatcher(deps: BotDeps): Dispatcher {
   }
   return {
     dispatch(update) {
-      if (gate(update, gateOptions(deps)) === 'handle' && commandFrom(update, deps) !== undefined) {
+      if (closed) return
+      const command = gate(update, gateOptions(deps)) === 'handle' ? commandFrom(update, deps) : undefined
+      if (command === 'stop' || command === 'help') {
         void handleMessage(update, deps).catch(report(update))
         return
       }
+      if (command === 'reset') deps.agents.stop(update.message.chat.id)
       enqueue(update.message.chat.id, () => handleMessage(update, deps).catch(report(update)))
     },
     enqueue,
     isBusy: chatId => chains.has(chatId),
+    close() {
+      closed = true
+    },
   }
 }

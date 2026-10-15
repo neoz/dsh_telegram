@@ -6,6 +6,7 @@ import { commandOf, createDispatcher, gate, handleMessage, isAllowed, type BotDe
 import { ChatLog } from '../src/chatlog.ts'
 import { Config } from '../src/config.ts'
 import { MemoryStore } from '../src/memory.ts'
+import { SeenIds } from '../src/poller.ts'
 import type { ZaloUpdate } from '../src/zalo-api.ts'
 import { FakeZaloApi } from './helpers/fake-api.ts'
 
@@ -113,6 +114,31 @@ describe('handleMessage', () => {
     expect(deps.log.info).toHaveBeenCalledWith('dsh-zalo: ignored a private message from bob (Bob), who is not in allowFrom')
   })
 
+  it('logs an unknown sender once, so strangers cannot flood the log', async () => {
+    deps = { ...deps, strangers: new SeenIds(10) }
+    await handleMessage(upd('hi', 'PRIVATE', bob), deps)
+    await handleMessage(upd('again', 'PRIVATE', bob), deps)
+    expect(deps.log.info).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets a super admin in even when allowFrom does not list them', async () => {
+    deps = { ...deps, config: Config({ ...deps.config, allowFrom: ['ann'], superAdmins: ['root'] }) }
+    await handleMessage(upd('hi', 'PRIVATE', { id: 'root', display_name: 'Root', is_bot: false }), deps)
+    expect(api.callsTo('sendMessage')[0]!.args.slice(0, 2)).toEqual(['p1', 'answer'])
+  })
+
+  it('cancels the running turn at once but resets only after queued work, so no turn uses a disposed agent', async () => {
+    const dispatcher = createDispatcher(deps)
+    let release: (() => void) | undefined
+    dispatcher.enqueue('p1', () => new Promise<void>((r) => { release = r }))
+    dispatcher.dispatch(upd('/reset'))
+    await vi.waitFor(() => expect(release).toBeDefined())
+    expect(agents.stop).toHaveBeenCalledWith('p1')
+    expect(agents.reset).not.toHaveBeenCalled()
+    release!()
+    await vi.waitFor(() => expect(agents.reset).toHaveBeenCalledWith('p1'))
+  })
+
   it('logs an untriggered group message without a turn', async () => {
     await handleMessage(upd('chatter', 'GROUP'), deps)
     expect(api.callsTo('sendMessage')).toEqual([])
@@ -153,5 +179,19 @@ describe('createDispatcher', () => {
     release!()
     await vi.waitFor(() => expect(dispatcher.isBusy('c')).toBe(false))
     expect(order).toEqual(['a', 'b'])
+  })
+
+  it('after close, skips queued tasks that have not started and accepts no new ones', async () => {
+    const order: string[] = []
+    const dispatcher = createDispatcher({ log: { info: () => {}, warn: () => {}, error: () => {} } } as never)
+    let release: (() => void) | undefined
+    dispatcher.enqueue('c', () => new Promise<void>((r) => { release = () => { order.push('a'); r() } }))
+    dispatcher.enqueue('c', async () => { order.push('b') })
+    await vi.waitFor(() => expect(release).toBeDefined())
+    dispatcher.close()
+    dispatcher.enqueue('c', async () => { order.push('c') })
+    release!()
+    await vi.waitFor(() => expect(dispatcher.isBusy('c')).toBe(false))
+    expect(order).toEqual(['a'])
   })
 })
