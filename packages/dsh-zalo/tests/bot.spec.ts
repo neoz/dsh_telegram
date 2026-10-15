@@ -98,6 +98,12 @@ describe('handleMessage', () => {
     expect(agents.markTurn).toHaveBeenCalledWith('p1', log[0]!.ts)
   })
 
+  it('logs the id of an unknown private sender so it can be added to allowFrom', async () => {
+    await handleMessage(upd('hi', 'PRIVATE', bob), deps)
+    expect(api.callsTo('sendMessage')).toEqual([])
+    expect(deps.log.info).toHaveBeenCalledWith('dsh-zalo: ignored a private message from bob (Bob), who is not in allowFrom')
+  })
+
   it('logs an untriggered group message without a turn', async () => {
     await handleMessage(upd('chatter', 'GROUP'), deps)
     expect(api.callsTo('sendMessage')).toEqual([])

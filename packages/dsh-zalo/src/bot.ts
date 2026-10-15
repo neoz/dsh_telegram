@@ -94,7 +94,14 @@ async function runCommand(command: Command, chatId: string, deps: BotDeps): Prom
 
 export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<void> {
   const verdict = gate(update, gateOptions(deps))
-  if (verdict === 'ignore') return
+  const sender = update.message.from
+  if (verdict === 'ignore') {
+    // Zalo ids are opaque, so this line is how an operator learns the id to put in allowFrom.
+    if (update.message.chat.chat_type !== 'GROUP' && sender !== undefined && sender.is_bot !== true) {
+      deps.log.info(`dsh-zalo: ignored a private message from ${sender.id} (${sender.display_name ?? ''}), who is not in allowFrom`)
+    }
+    return
+  }
   const chatId = update.message.chat.id
   if (verdict === 'log-only') {
     await deps.chatLog.append(chatId, logEntryFor(update))
