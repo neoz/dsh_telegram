@@ -156,6 +156,36 @@ function startPolling(bot: Bot, config: Config, log: ReturnType<typeof loggerFor
   }
 }
 
+/**
+ * Call `start` until it resolves, doubling the delay after each failure up to `maxDelayMs`.
+ * A failed boot (network down, a bad state file) must not leave the process up with no bot.
+ * Returns a cancel that stops further attempts.
+ */
+export function retryStart<T>(
+  start: () => Promise<T>,
+  onStarted: (result: T) => void,
+  onError: (error: unknown, delayMs: number) => void,
+  backoff: { startDelayMs: number; maxDelayMs: number },
+): () => void {
+  let cancelled = false
+  let timer: NodeJS.Timeout | undefined
+  const attempt = (failures: number): void => {
+    start().then(onStarted, (error: unknown) => {
+      if (cancelled) return
+      const delayMs = Math.min(backoff.startDelayMs * 2 ** failures, backoff.maxDelayMs)
+      onError(error, delayMs)
+      timer = setTimeout(() => attempt(failures + 1), delayMs)
+    })
+  }
+  attempt(0)
+  return () => {
+    cancelled = true
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+const STARTUP_BACKOFF = { startDelayMs: 5_000, maxDelayMs: 300_000 }
+
 const DAY_MS = 86_400_000
 
 /** Sweeps old inbox and outbox files now and then once a day; returns the timer to clear on stop. */
@@ -180,7 +210,7 @@ export function apply(ctx: Context, config: Config): void {
   let revoke: (() => void) | undefined
   let stopped = false
   ctx.effect(() => {
-    void start(ctx, config).then((result) => {
+    const cancel = retryStart(() => start(ctx, config), (result) => {
       if (stopped) {
         void result.polling.stop().then(() => result.agents.disposeAll())
         return
@@ -188,11 +218,12 @@ export function apply(ctx: Context, config: Config): void {
       started = result
       // Provided only now: Cordis starts dependants as soon as a name is provided, with or without a value.
       revoke = ctx.provide('telegram', result.service)
-    }).catch((error: unknown) => {
-      log.error(`dsh-telegram: failed to start: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
-    })
+    }, (error, delayMs) => {
+      log.error(`dsh-telegram: failed to start: ${error instanceof Error ? error.stack ?? error.message : String(error)}; retrying in ${delayMs}ms`)
+    }, STARTUP_BACKOFF)
     return () => {
       stopped = true
+      cancel()
       if (started === undefined) return
       const { polling, agents } = started
       started = undefined
