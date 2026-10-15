@@ -36,6 +36,15 @@ describe('gate / isAllowed / commandOf', () => {
     expect(gate(upd('/ask hi', 'GROUP'), g)).toBe('handle')
     expect(gate(upd('@dshbot hi', 'GROUP', bob), g)).toBe('log-only')
   })
+  it('treats any chat type but PRIVATE as a group, so an unexpected value never answers untriggered', () => {
+    const typed = (chatType: string, text: string) => {
+      const u = upd(text)
+      return { ...u, message: { ...u.message, chat: { id: 'x', chat_type: chatType as never } } }
+    }
+    expect(gate(typed('group', 'hello'), g)).toBe('log-only')
+    expect(gate(typed('GROUP_CHAT', 'hello'), g)).toBe('log-only')
+    expect(gate(typed('private', 'hello'), g)).toBe('handle')
+  })
   it('ignores bots and the bot itself', () => {
     expect(gate(upd('x', 'PRIVATE', { id: 'x', is_bot: true } as never), g)).toBe('ignore')
     expect(gate(upd('x', 'GROUP', { id: 'bot1' } as never), g)).toBe('ignore')

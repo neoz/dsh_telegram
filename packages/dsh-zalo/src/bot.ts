@@ -7,7 +7,7 @@ import type { ImageMediaType } from './media.ts'
 import { renderMemoryBlock, type MemoryStore } from './memory.ts'
 import type { ChatAgents } from './sessions.ts'
 import { runTurn } from './turn.ts'
-import type { ZaloApi, ZaloUpdate, ZaloUser } from './zalo-api.ts'
+import { isGroupChat, type ZaloApi, type ZaloUpdate, type ZaloUser } from './zalo-api.ts'
 
 export type GateVerdict = 'ignore' | 'log-only' | 'handle'
 
@@ -38,7 +38,7 @@ export function gate(update: ZaloUpdate, options: { allowFrom: readonly string[]
   const sender = message.from
   if (sender === undefined || sender.is_bot === true || sender.id === options.botId) return 'ignore'
   const allowed = isAllowed(sender, options.allowFrom)
-  if (message.chat.chat_type !== 'GROUP') return allowed ? 'handle' : 'ignore'
+  if (!isGroupChat(message.chat)) return allowed ? 'handle' : 'ignore'
   return allowed && hasTrigger(bodyText(message), options) ? 'handle' : 'log-only'
 }
 
@@ -97,7 +97,7 @@ export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<
   const sender = update.message.from
   if (verdict === 'ignore') {
     // Zalo ids are opaque, so this line is how an operator learns the id to put in allowFrom.
-    if (update.message.chat.chat_type !== 'GROUP' && sender !== undefined && sender.is_bot !== true) {
+    if (!isGroupChat(update.message.chat) && sender !== undefined && sender.is_bot !== true) {
       deps.log.info(`dsh-zalo: ignored a private message from ${sender.id} (${sender.display_name ?? ''}), who is not in allowFrom`)
     }
     return

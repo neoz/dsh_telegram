@@ -56,6 +56,11 @@ describe('parseInbound', () => {
     expect(parsed).toMatchObject({ chatId: 'c1', messageId: 'mid1', isGroup: true, text: 'hello', images: [] })
   })
 
+  it('strips the trigger for a group whatever the case of its chat type', async () => {
+    const parsed = await parseInbound(upd('text', { text: '@dshbot hello' }, 'group' as never), { ...trig, api, inboxDir: dir, log })
+    expect(parsed).toMatchObject({ isGroup: true, text: 'hello' })
+  })
+
   it('downloads a photo, sniffs its type and saves it in the inbox', async () => {
     api.downloads.set('https://p', JPEG)
     const parsed = await parseInbound(upd('image', { photo: 'https://p', caption: 'look' }), { ...trig, api, inboxDir: dir, log })

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ChatLogEntry } from './chatlog.ts'
 import { extensionFor, pathSafe, sniffImageType, type ImageMediaType } from './media.ts'
-import type { ZaloApi, ZaloMessage, ZaloUpdate, ZaloUser } from './zalo-api.ts'
+import { isGroupChat, type ZaloApi, type ZaloMessage, type ZaloUpdate, type ZaloUser } from './zalo-api.ts'
 
 export interface InboundImage { data: Buffer; mediaType: ImageMediaType }
 
@@ -89,7 +89,7 @@ export async function parseInbound(
   options: TriggerOptions & { api: ZaloApi; inboxDir: string; log: { warn(msg: string): void } },
 ): Promise<InboundMessage> {
   const { message } = update
-  const isGroup = message.chat.chat_type === 'GROUP'
+  const isGroup = isGroupChat(message.chat)
   const photo = message.photo === undefined ? undefined : await fetchPhoto(message.photo, message.message_id, options)
   const logEntry = logEntryFor(update, photo === undefined ? undefined : [photo.path])
   let text = isGroup ? stripTrigger(bodyText(message), options) : bodyText(message)

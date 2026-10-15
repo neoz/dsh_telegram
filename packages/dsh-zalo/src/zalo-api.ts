@@ -21,6 +21,28 @@ export interface ZaloMessage {
 
 export interface ZaloUpdate { event_name: string; message: ZaloMessage }
 
+/** Anything but an explicit private chat counts as a group, so an unexpected `chat_type` falls back to needing a trigger. */
+export function isGroupChat(chat: ZaloMessage['chat']): boolean {
+  return String(chat.chat_type).toUpperCase() !== 'PRIVATE'
+}
+
+const idString = (value: unknown) => (typeof value === 'number' ? String(value) : value)
+
+/** Ids as strings whatever type Zalo sends them in; an update without a message passes through for the poller to skip. */
+function normalizeUpdate(update: ZaloUpdate): ZaloUpdate {
+  const { message } = update
+  if (message === undefined || message === null) return update
+  return {
+    ...update,
+    message: {
+      ...message,
+      message_id: idString(message.message_id) as string,
+      ...(message.from === undefined ? {} : { from: { ...message.from, id: idString(message.from.id) as string } }),
+      ...(message.chat === undefined ? {} : { chat: { ...message.chat, id: idString(message.chat.id) as string } }),
+    },
+  }
+}
+
 /** The Bot API surface the plugin needs; tests substitute a recorder. */
 export interface ZaloApi {
   getMe(): Promise<{ id: string; accountName: string }>
@@ -92,7 +114,7 @@ export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: type
       try {
         const result = await call<ZaloUpdate | ZaloUpdate[] | null>('getUpdates', { timeout: timeoutSec }, (timeoutSec + 10) * 1000, signal)
         if (result === undefined || result === null) return []
-        return Array.isArray(result) ? result : [result]
+        return (Array.isArray(result) ? result : [result]).map(normalizeUpdate)
       } catch (error) {
         if (error instanceof ZaloApiError && error.code === POLL_TIMEOUT_CODE) return []
         throw error

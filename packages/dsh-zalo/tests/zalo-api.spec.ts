@@ -30,6 +30,13 @@ describe('createZaloApi', () => {
     expect(await none.getUpdates(30)).toEqual([])
   })
 
+  it('turns numeric ids into strings, since Zalo docs disagree on their type', async () => {
+    const raw = { event_name: 'message.text.received', message: { message_id: 7, from: { id: 8 }, chat: { id: 9, chat_type: 'PRIVATE' }, date: 1 } }
+    const api = createZaloApi('T', retry, (async () => json({ ok: true, result: raw })) as never)
+    const [update] = await api.getUpdates(30)
+    expect(update!.message).toMatchObject({ message_id: '7', from: { id: '8' }, chat: { id: '9' } })
+  })
+
   it('treats a 408 long-poll timeout as no updates', async () => {
     const api = createZaloApi('T', retry, (async () => json({ ok: false, error_code: 408, description: 'Request timeout' })) as never)
     expect(await api.getUpdates(30)).toEqual([])
