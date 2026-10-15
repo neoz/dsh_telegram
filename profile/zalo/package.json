@@ -1,0 +1,10 @@
+{
+  "name": "dsh-profile-zalo",
+  "private": true,
+  "dsh": {
+    "profile": {
+      "bundles": ["@deepseek-ai/dsh-base", "dsh-zalo", "dsh-web-search-searxng"],
+      "patchReload": "startup"
+    }
+  }
+}
