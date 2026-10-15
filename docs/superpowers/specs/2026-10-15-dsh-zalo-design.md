@@ -56,7 +56,8 @@ packages/dsh-zalo/
     turn.ts          one agent turn: typing loop, summary, delivery
     render.ts        markdown chunking to 2000 chars
     sessions.ts      ChatAgents (from dsh-telegram, chatId: string)
-    tools.ts         memory_save, memory_recall, memory_forget
+    tools.ts         zalo_chat_history, memory_save, memory_recall, memory_forget
+                     (as dsh-telegram minus telegram_send_file)
     service.ts       ZaloService + Cordis Context/Events augmentation
     chatlog.ts, memory.ts, session-map.ts, json-file.ts, retention.ts,
     media.ts, logger.ts   copied from dsh-telegram, chatId: string
