@@ -42,7 +42,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   // Wait for the complete application so agent-scoped tools and adapters are composed.
   await ctx.get('loader')?.await()
 
-  const api = createZaloApi(config.botToken, config.retry)
+  const api = createZaloApi(config.botToken, config.retry, fetch, config.maxDownloadMb * 1024 * 1024)
   const me = await api.getMe()
 
   const chatLog = new ChatLog(join(config.dataDir, 'chatlog'), forwardAppends((chatId, entry) => ctx.emit('zalo/message', chatId, entry), log.warn), config.chatLogMaxEntries)

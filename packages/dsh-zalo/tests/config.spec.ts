@@ -9,7 +9,7 @@ describe('Config', () => {
     expect(config).toMatchObject({
       provider: 'deepseek-official', groupPrefix: '/ask', messageSize: 2000, pollTimeoutSec: 30,
       typingIntervalMs: 4000, recentMessagesLimit: 30, turnTimeoutMs: 900_000, fileRetentionDays: 90,
-      chatLogMaxEntries: 15_000, superAdmins: [],
+      chatLogMaxEntries: 15_000, superAdmins: [], maxDownloadMb: 20,
       retry: { maxAttempts: 4, startDelayMs: 500, maxDelayMs: 8000 },
       memory: { maxEntries: 50, maxGlobalEntries: 50, maxEntryChars: 200 },
     })

@@ -65,7 +65,12 @@ const DOWNLOAD_TIMEOUT_MS = 60_000
 /** Zalo answers an empty long poll with this code. */
 const POLL_TIMEOUT_CODE = 408
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+/** Resolves after `ms`, or rejects at once when `signal` aborts, so a stopping poller never waits out a backoff. */
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted === true) return reject(signal.reason)
+  const timer = setTimeout(resolve, ms)
+  signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason) }, { once: true })
+})
 
 /**
  * Fetches with exponential backoff on 429 and 5xx, and on network failures unless `retryThrown` is false;
@@ -82,13 +87,33 @@ async function fetchWithRetry(retry: RetryConfig, attempt: () => Promise<Respons
     } catch (error) {
       if (!retryThrown || n >= retry.maxAttempts || signal?.aborted === true) throw error
     }
-    await sleep(Math.min(retry.startDelayMs * 2 ** (n - 1), retry.maxDelayMs))
+    await sleep(Math.min(retry.startDelayMs * 2 ** (n - 1), retry.maxDelayMs), signal)
   }
+}
+
+/** Reads the body, failing as soon as it grows past `maxBytes`. */
+async function readCapped(response: Response, maxBytes: number): Promise<Buffer> {
+  const tooLarge = () => new ZaloApiError(`download failed: larger than ${maxBytes} bytes`)
+  if (Number(response.headers.get('content-length') ?? 0) > maxBytes) {
+    await response.body?.cancel()
+    throw tooLarge()
+  }
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for await (const chunk of response.body ?? []) {
+    size += chunk.byteLength
+    if (size > maxBytes) {
+      await response.body?.cancel().catch(() => {})
+      throw tooLarge()
+    }
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
 }
 
 interface Envelope<T> { ok?: boolean; result?: T; error_code?: number; description?: string }
 
-export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: typeof fetch = fetch): ZaloApi {
+export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: typeof fetch = fetch, maxDownloadBytes = 20 * 1024 * 1024): ZaloApi {
   /** `idempotent: false` never retries a thrown error: the request may have reached Zalo before the connection failed. */
   const call = async <T>(method: string, body: object, timeoutMs = REQUEST_TIMEOUT_MS, signal?: AbortSignal, idempotent = true): Promise<T | undefined> => {
     const response = await fetchWithRetry(retry, () => fetchImpl(`${ZALO_API_BASE}/bot${token}/${method}`, {
@@ -134,7 +159,7 @@ export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: type
     async downloadUrl(url) {
       const response = await fetchWithRetry(retry, () => fetchImpl(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) }))
       if (!response.ok) throw new ZaloApiError(`download failed: HTTP ${response.status}`, response.status)
-      return Buffer.from(await response.arrayBuffer())
+      return readCapped(response, maxDownloadBytes)
     },
   }
 }

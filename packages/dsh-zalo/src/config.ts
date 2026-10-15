@@ -30,6 +30,8 @@ export interface Config {
   readonly fileRetentionDays: number
   /** Each chat log keeps its newest entries up to this many; older ones are dropped. */
   readonly chatLogMaxEntries: number
+  /** Inbound photos larger than this are not downloaded. */
+  readonly maxDownloadMb: number
   readonly retry: RetryConfig
   /** Zalo user ids allowed to run commands and edit global memory. */
   readonly superAdmins: string[]
@@ -52,6 +54,7 @@ export const Config: z<Config> = z.object({
   turnTimeoutMs: z.number().min(1).default(900_000),
   fileRetentionDays: z.number().min(1).default(90),
   chatLogMaxEntries: z.number().min(1).default(15_000),
+  maxDownloadMb: z.number().min(1).default(20),
   retry: z.object({
     maxAttempts: z.number().min(1).default(4),
     startDelayMs: z.number().min(0).default(500),

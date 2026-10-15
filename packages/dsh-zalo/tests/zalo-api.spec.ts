@@ -77,6 +77,23 @@ describe('createZaloApi', () => {
     expect(String((error as Error).message)).not.toContain('SECRET')
   })
 
+  it('stops waiting between retries as soon as the poll is aborted', async () => {
+    const api = createZaloApi('T', { maxAttempts: 5, startDelayMs: 10_000, maxDelayMs: 10_000 }, (async () => json({}, 503)) as never)
+    const abort = new AbortController()
+    const started = Date.now()
+    const poll = api.getUpdates(30, abort.signal)
+    setTimeout(() => abort.abort(), 20)
+    await expect(poll).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('refuses a download larger than the cap', async () => {
+    const api = createZaloApi('T', retry, (async () => new Response('x'.repeat(11))) as never, 10)
+    await expect(api.downloadUrl('https://img')).rejects.toThrow(/larger than 10 bytes/)
+    const declared = createZaloApi('T', retry, (async () => new Response('x', { headers: { 'content-length': '999' } })) as never, 10)
+    await expect(declared.downloadUrl('https://img')).rejects.toThrow(/larger than 10 bytes/)
+  })
+
   it('downloads a URL with retry and rejects non-2xx', async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(new Response('x', { status: 503 })).mockResolvedValueOnce(new Response('abc'))
     const api = createZaloApi('T', retry, fetchImpl as never)
