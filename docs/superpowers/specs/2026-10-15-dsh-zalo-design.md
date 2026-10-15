@@ -179,3 +179,12 @@ Vitest with a `FakeZaloApi` recorder:
 - `turn`: typing repeats until done; multi-chunk reply order; plain-text fallback.
 - `config`: defaults and `assertConfig` errors.
 - `profile`: `cordis.patch.yml` parses and names the expected plugins.
+
+## Spike findings (observed on the live bot, 2026-10-15)
+
+- `getMe` returns `id` (digits as a string), `account_name` (`bot.xxxx`), `account_type`, `can_join_groups` and `display_name`.
+- Ids are strings: users and private chats are 20 hex chars, and a private chat's id equals its user's id; groups are `zgr-` plus 20 hex chars; message ids are 20 hex chars and carry no order.
+- `date` is in milliseconds.
+- A group mention arrives as `@<display_name>` in the text (for example `@Bot Trợ Lý SI`), never `@<account_name>`; triggers therefore accept both names.
+- In groups, only messages that mention the bot have been delivered so far; untagged group messages have not reached `getUpdates`.
+- `parse_mode: markdown` renders bold correctly; no chunk has been rejected yet.
