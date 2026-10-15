@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { pathSafe } from '../src/media.ts'
 import { SessionMap } from '../src/session-map.ts'
 import { ChatAgents } from '../src/sessions.ts'
 
@@ -33,8 +34,8 @@ describe('ChatAgents', () => {
   it('creates one zalo session per chat in a safe workspace and reuses it', async () => {
     const { agents, map, registry } = setup()
     const first = await agents.resolve('a/b')
-    expect(String(first.agent.id)).toMatch(/^zalo-a_b-/)
-    expect(agents.workspaceFor('a/b')).toBe(join(dir, 'ws', 'a_b'))
+    expect(String(first.agent.id)).toMatch(new RegExp(`^zalo-${pathSafe('a/b')}-`))
+    expect(agents.workspaceFor('a/b')).toBe(join(dir, 'ws', pathSafe('a/b')))
     expect(map.get('a/b')).toMatchObject({ lastTurnAt: '' })
     await agents.resolve('a/b')
     expect(registry.create).toHaveBeenCalledTimes(1)

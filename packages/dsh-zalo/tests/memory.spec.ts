@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MemoryStore, renderMemoryBlock } from '../src/memory.ts'
+import { pathSafe } from '../src/media.ts'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'memory-')) })
@@ -18,7 +19,7 @@ describe('MemoryStore', () => {
     expect((await store.list(scope)).map(e => e.text)).toEqual(['likes coffee'])
     await store.forget(scope, first.id)
     expect(await store.list(scope)).toEqual([])
-    expect(await readdir(dir)).toEqual(['a_b.json'])
+    expect(await readdir(dir)).toEqual([`${pathSafe('a/b')}.json`])
   })
   it('rejects text over the limit and a full store', async () => {
     const store = new MemoryStore(dir, limits)

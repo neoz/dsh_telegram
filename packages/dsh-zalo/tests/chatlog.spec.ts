@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ChatLog, formatEntry, type ChatLogEntry } from '../src/chatlog.ts'
+import { pathSafe } from '../src/media.ts'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'chatlog-')) })
@@ -31,7 +32,7 @@ describe('ChatLog', () => {
   it('stores a hostile chat id inside its directory', async () => {
     const log = new ChatLog(join(dir, 'log'))
     await log.append('../evil', entry(1, 'a'))
-    expect(await readdir(join(dir, 'log'))).toEqual(['___evil.jsonl'])
+    expect(await readdir(join(dir, 'log'))).toEqual([`${pathSafe('../evil')}.jsonl`])
   })
 
   it('trims to the newest maxEntries', async () => {

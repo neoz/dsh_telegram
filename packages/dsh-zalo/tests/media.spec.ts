@@ -6,9 +6,12 @@ describe('pathSafe', () => {
     expect(pathSafe('6ede9afa66b88fe6d6a9')).toBe('6ede9afa66b88fe6d6a9')
   })
   it('replaces separators and dots so an id never leaves its directory', () => {
-    expect(pathSafe('../x')).toBe('___x')
-    expect(pathSafe('a/b\\c')).toBe('a_b_c')
-    expect(pathSafe('')).toBe('_')
+    for (const id of ['../x', 'a/b\\c', '', '..']) expect(pathSafe(id)).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(pathSafe('../x')).toMatch(/^___x-[0-9a-f]{8}$/)
+  })
+  it('keeps two different ids apart even when they sanitise alike', () => {
+    expect(pathSafe('a/b')).not.toBe(pathSafe('a_b'))
+    expect(pathSafe('a/b')).not.toBe(pathSafe('a.b'))
   })
 })
 
