@@ -5,6 +5,7 @@ param(
     [string]$Registry = "ghcr.io",
     [string]$Owner = "neoz",
     [string]$ImageName = "dsh-telegram",
+    [string]$Dockerfile = "docker/Dockerfile",
     [switch]$NoPush
 )
 
@@ -18,7 +19,7 @@ $FullImage = "$Registry/$Owner/${ImageName}:latest"
 
 Write-Host "Building $FullImage ..." -ForegroundColor Cyan
 
-docker buildx build --platform linux/arm64 --provenance=false -f docker/Dockerfile -t $FullImage --load .
+docker buildx build --platform linux/arm64 --provenance=false -f $Dockerfile -t $FullImage --load .
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed." -ForegroundColor Red

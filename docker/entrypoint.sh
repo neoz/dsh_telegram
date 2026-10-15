@@ -8,7 +8,8 @@ if [ "$(id -u)" = 0 ]; then
   exec setpriv --reuid=node --regid=node --init-groups "$0" "$@"
 fi
 # Refresh the profile from the image on every start; sessions stay in the volume.
+PROFILE="${DSH_PROFILE:-telegram}"
 mkdir -p "$DSH_HOME/profiles" "$DSH_AGENTS_HOME/skills"
-rm -rf "$DSH_HOME/profiles/telegram"
-cp -R /opt/dsh-telegram/profile "$DSH_HOME/profiles/telegram"
+rm -rf "$DSH_HOME/profiles/$PROFILE"
+cp -R "/opt/dsh-$PROFILE/profile" "$DSH_HOME/profiles/$PROFILE"
 exec "$@"

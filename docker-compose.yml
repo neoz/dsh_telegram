@@ -26,6 +26,31 @@ services:
       - llm-proxy
     restart: unless-stopped
 
+  # Started only with `docker compose --profile zalo up -d`, so a host without a Zalo bot is unaffected.
+  dsh-zalo:
+    image: ghcr.io/neoz/dsh-zalo:latest
+    profiles: [zalo]
+    # Only what the agent needs is mapped from .env; the rest stays out of the agent process.
+    environment:
+      ZALO_BOT_TOKEN: ${ZALO_BOT_TOKEN}
+      ZALO_ALLOW_FROM: ${ZALO_ALLOW_FROM}
+      ZALO_SUPER_ADMINS: ${ZALO_SUPER_ADMINS:-}
+      DSH_MODEL: ${DSH_MODEL:-deepseek-flash}
+      DSH_LOG_LEVEL: ${DSH_LOG_LEVEL:-2}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      DSH_PERMISSION_MODE: danger-full-access
+      SEARXNG_URL: http://searxng:8080
+      DEEPSEEK_BASE_URL: http://llm-proxy:8080/anthropic
+      DEEPSEEK_API_KEY: proxy
+    volumes:
+      - ./zalo/workspace:/workspace
+      - ./zalo/data:/data
+      - dsh-zalo-home:/dsh-home
+    depends_on:
+      - searxng
+      - llm-proxy
+    restart: unless-stopped
+
   # Self-hosted metasearch behind web_search; not published outside the compose network.
   searxng:
     image: searxng/searxng:2026.10.2-19ffbcd30
@@ -48,3 +73,4 @@ services:
 
 volumes:
   dsh-home:
+  dsh-zalo-home:
