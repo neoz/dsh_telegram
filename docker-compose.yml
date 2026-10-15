@@ -10,6 +10,7 @@ services:
       TELEGRAM_IDLE_CHATS: ${TELEGRAM_IDLE_CHATS:-}
       DSH_MODEL: ${DSH_MODEL:-deepseek-flash}
       DSH_LOG_LEVEL: ${DSH_LOG_LEVEL:-2}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
       DSH_PERMISSION_MODE: danger-full-access
       SEARXNG_URL: http://searxng:8080
       # The agent talks to DeepSeek through llm-proxy, which holds the real key; dsh still
