@@ -18,6 +18,22 @@ describe('splitMessage', () => {
     const parts = splitMessage('x'.repeat(4500), 2000)
     expect(parts.map(p => p.length)).toEqual([2000, 2000, 500])
   })
+  it('closes a code fence at a cut and reopens it in the next message', () => {
+    const text = `intro\n\`\`\`\n${'x'.repeat(30)}\n`.concat(`${'y'.repeat(30)}\n`.repeat(6), '```\nend')
+    const parts = splitMessage(text, 100)
+    expect(parts.length).toBeGreaterThan(1)
+    for (const part of parts) {
+      expect(part.length).toBeLessThanOrEqual(100)
+      expect((part.match(/```/g) ?? []).length % 2).toBe(0)
+    }
+  })
+  it('keeps a joined emoji sequence whole at a hard cut', () => {
+    const family = '\u{1F468}‍\u{1F469}‍\u{1F467}'
+    const text = `${'x'.repeat(97)}${family}${'y'.repeat(10)}`
+    const parts = splitMessage(text, 100)
+    expect(parts.join('')).toBe(text)
+    expect(parts[1]!.startsWith(family)).toBe(true)
+  })
   it('never splits a surrogate pair at a hard cut', () => {
     const text = `${'x'.repeat(99)}\u{1F600}${'y'.repeat(10)}`
     const parts = splitMessage(text, 100)

@@ -9,6 +9,10 @@ if [ "$(id -u)" = 0 ]; then
 fi
 # Refresh the profile from the image on every start; sessions stay in the volume.
 PROFILE="${DSH_PROFILE:-telegram}"
+# The name becomes part of an `rm -rf` path; a slash or dot could reach outside the profiles folder.
+case "$PROFILE" in
+  *[!a-z0-9-]*) echo "entrypoint: invalid DSH_PROFILE '$PROFILE'" >&2; exit 1 ;;
+esac
 mkdir -p "$DSH_HOME/profiles" "$DSH_AGENTS_HOME/skills"
 rm -rf "$DSH_HOME/profiles/$PROFILE"
 cp -R "/opt/dsh-$PROFILE/profile" "$DSH_HOME/profiles/$PROFILE"
