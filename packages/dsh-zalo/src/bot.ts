@@ -1,0 +1,208 @@
+import { join } from 'node:path'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
+import type { Config } from './config.ts'
+import { bodyText, hasTrigger, logEntryFor, parseInbound, stripTrigger } from './inbound.ts'
+import type { ImageMediaType } from './media.ts'
+import { renderMemoryBlock, type MemoryStore } from './memory.ts'
+import type { ChatAgents } from './sessions.ts'
+import { runTurn } from './turn.ts'
+import type { ZaloApi, ZaloUpdate, ZaloUser } from './zalo-api.ts'
+
+export type GateVerdict = 'ignore' | 'log-only' | 'handle'
+
+export interface ImageStore {
+  saveImages(images: ReadonlyArray<{ data: Uint8Array; mediaType: ImageMediaType }>): Promise<ReadonlyArray<{ attachmentId: unknown }>>
+}
+
+export interface BotDeps {
+  api: ZaloApi
+  config: Config
+  chatLog: ChatLog
+  memory: MemoryStore
+  agents: ChatAgents
+  attachments: ImageStore
+  bot: { id: string; accountName: string }
+  log: { info(msg: string): void; warn(msg: string): void; error(msg: string): void }
+  /** Called when a message is about to get a turn (not for commands or log-only messages). */
+  noteTurn?: (chatId: string) => void
+}
+
+/** Ids only: Zalo display names are chosen by the sender and prove nothing. */
+export function isAllowed(user: ZaloUser, allowFrom: readonly string[]): boolean {
+  return allowFrom.some(entry => entry.trim() === user.id)
+}
+
+export function gate(update: ZaloUpdate, options: { allowFrom: readonly string[]; botId: string; accountName: string; groupPrefix: string }): GateVerdict {
+  const { message } = update
+  const sender = message.from
+  if (sender === undefined || sender.is_bot === true || sender.id === options.botId) return 'ignore'
+  const allowed = isAllowed(sender, options.allowFrom)
+  if (message.chat.chat_type !== 'GROUP') return allowed ? 'handle' : 'ignore'
+  return allowed && hasTrigger(bodyText(message), options) ? 'handle' : 'log-only'
+}
+
+export type Command = 'reset' | 'stop' | 'help'
+
+const HELP_TEXT = '/reset - start a new conversation\n/stop - cancel the running reply\n/help - show this list'
+
+export function commandOf(text: string): Command | undefined {
+  const match = /^\s*\/(reset|stop|help)\s*$/.exec(text)
+  return match === null ? undefined : match[1] as Command
+}
+
+const gateOptions = (deps: BotDeps) => ({
+  allowFrom: deps.config.allowFrom, botId: deps.bot.id, accountName: deps.bot.accountName, groupPrefix: deps.config.groupPrefix,
+})
+
+/** Commands are for super admins only; anyone else sending `/stop` gets an ordinary turn. */
+function commandFrom(update: ZaloUpdate, deps: BotDeps): Command | undefined {
+  const senderId = update.message.from?.id
+  if (senderId === undefined || !deps.config.superAdmins.includes(senderId)) return undefined
+  return commandOf(stripTrigger(bodyText(update.message), gateOptions(deps)))
+}
+
+/** Untrusted group text (other members included) fenced off from the user's own message; the persona names the tag as data. */
+function recentBlock(entries: ChatLogEntry[]): string {
+  return `<group_messages>\n${entries.map(e => `- ${senderLabel(e)}: ${oneLine(e.text)}`).join('\n')}\n</group_messages>`
+}
+
+/** Chat plus global memory for the first turn of a session; undefined when reading failed, so the session stays unmarked. */
+async function memoryBlock(deps: BotDeps, chatId: string): Promise<string | undefined> {
+  try {
+    const [chat, global] = await Promise.all([deps.memory.list({ kind: 'chat', chatId }), deps.memory.list({ kind: 'global' })])
+    return renderMemoryBlock(chat, global)
+  } catch (error) {
+    deps.log.warn(`dsh-zalo: reading memory for chat ${chatId} failed: ${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
+}
+
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+
+async function runCommand(command: Command, chatId: string, deps: BotDeps): Promise<void> {
+  if (command === 'reset') {
+    await deps.agents.reset(chatId)
+    await deps.api.sendMessage(chatId, 'Started a new conversation.')
+  } else if (command === 'stop') {
+    // A cancelled turn reports "Stopped." on its own; only an idle agent needs a reply here.
+    if (!deps.agents.stop(chatId)) await deps.api.sendMessage(chatId, 'Nothing is running.')
+  } else {
+    await deps.api.sendMessage(chatId, HELP_TEXT)
+  }
+}
+
+export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<void> {
+  const verdict = gate(update, gateOptions(deps))
+  if (verdict === 'ignore') return
+  const chatId = update.message.chat.id
+  if (verdict === 'log-only') {
+    await deps.chatLog.append(chatId, logEntryFor(update))
+    return
+  }
+  const command = commandFrom(update, deps)
+  if (command !== undefined) {
+    await runCommand(command, chatId, deps)
+    return
+  }
+  deps.noteTurn?.(chatId)
+
+  const receivedAt = Date.now()
+  const lagMs = Math.max(0, receivedAt - update.message.date)
+  const inbound = await parseInbound(update, {
+    api: deps.api, inboxDir: join(deps.agents.workspaceFor(chatId), 'inbox'), log: deps.log,
+    accountName: deps.bot.accountName, groupPrefix: deps.config.groupPrefix,
+  })
+  await deps.chatLog.append(chatId, { ...inbound.logEntry, handled: true })
+
+  const resolved = await deps.agents.resolve(chatId)
+  if (resolved.resumeFailed !== undefined) {
+    await deps.api.sendMessage(chatId, 'The previous conversation could not be restored; starting a new one.')
+  }
+  deps.agents.setTurn(chatId, { sender: inbound.sender, isGroup: inbound.isGroup })
+
+  let text = inbound.text
+  if (inbound.isGroup) {
+    const recent = await deps.chatLog.recent(chatId, deps.agents.lastTurnAt(chatId), inbound.messageId, deps.config.recentMessagesLimit)
+    if (recent.length > 0) text = `${recentBlock(recent)}\n\n${text}`
+  }
+  // The memory block goes in front of the first user message of a session; later turns rely on memory_recall.
+  const sessionId = String(resolved.agent.id)
+  const memoryText = deps.agents.memoryInjected(chatId, sessionId) ? '' : await memoryBlock(deps, chatId)
+  if (memoryText !== undefined && memoryText !== '') text = `${memoryText}\n\n${text}`
+  await deps.agents.markTurn(chatId, inbound.logEntry.ts)
+
+  const content: ContentBlock[] = [{ type: 'text', text }]
+  if (inbound.images.length > 0) {
+    const refs = await deps.attachments.saveImages(inbound.images)
+    for (const ref of refs) content.push({ type: 'image', attachment: ref as never })
+  }
+  const prepMs = Date.now() - receivedAt
+  if (memoryText !== undefined) await deps.agents.markMemoryInjected(chatId, sessionId)
+
+  const result = await runTurn({
+    api: deps.api,
+    agent: resolved.agent as never,
+    chatId,
+    content,
+    messageSize: deps.config.messageSize,
+    typingIntervalMs: deps.config.typingIntervalMs,
+    turnTimeoutMs: deps.config.turnTimeoutMs,
+    log: deps.log,
+  })
+  if (result.text !== '') {
+    await deps.chatLog.append(chatId, {
+      ts: new Date().toISOString(),
+      message_id: result.sentMessageId ?? '',
+      user_id: deps.bot.id,
+      name: deps.bot.accountName,
+      text: result.text,
+      bot: true,
+    })
+  }
+  deps.log.info(`dsh-zalo: chat ${chatId} message ${inbound.messageId} -> ${result.outcome}`
+    + ` (lag ${seconds(lagMs)}, prep ${seconds(prepMs)}, agent ${seconds(result.timing.agentMs)}, deliver ${seconds(result.timing.deliverMs)})`)
+}
+
+export interface Dispatcher {
+  dispatch(update: ZaloUpdate): void
+  /** Appends a task to the chat's queue; tasks of one chat never overlap. */
+  enqueue(chatId: string, task: () => Promise<void>): void
+  /** Whether the chat has a running or waiting task. */
+  isBusy(chatId: string): boolean
+}
+
+/**
+ * Serialises message handling per chat so turns never overlap; commands bypass
+ * the queue so `/stop` and `/reset` act on the turn that is running. A failing
+ * task is logged and never blocks the next one.
+ */
+export function createDispatcher(deps: BotDeps): Dispatcher {
+  const chains = new Map<string, Promise<void>>()
+  const report = (update: ZaloUpdate) => (error: unknown) => {
+    deps.log.error(`dsh-zalo: message ${update.message.message_id} in chat ${update.message.chat.id} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+  }
+  const enqueue = (chatId: string, task: () => Promise<void>): void => {
+    const previous = chains.get(chatId) ?? Promise.resolve()
+    const next = previous
+      .then(task)
+      .catch((error: unknown) => {
+        deps.log.error(`dsh-zalo: queued task in chat ${chatId} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+      })
+      .finally(() => {
+        if (chains.get(chatId) === next) chains.delete(chatId)
+      })
+    chains.set(chatId, next)
+  }
+  return {
+    dispatch(update) {
+      if (gate(update, gateOptions(deps)) === 'handle' && commandFrom(update, deps) !== undefined) {
+        void handleMessage(update, deps).catch(report(update))
+        return
+      }
+      enqueue(update.message.chat.id, () => handleMessage(update, deps).catch(report(update)))
+    },
+    enqueue,
+    isBusy: chatId => chains.has(chatId),
+  }
+}
