@@ -37,6 +37,8 @@ export interface Config {
   readonly pollRetryMs: number
   /** Inbox and outbox files untouched for this many days are deleted. */
   readonly fileRetentionDays: number
+  /** Each chat log keeps its newest entries up to this many; older ones are dropped. */
+  readonly chatLogMaxEntries: number
   readonly retry: RetryConfig
   readonly status: StatusLabels
   /** Telegram user ids allowed to add, replace, or forget global memory entries. */
@@ -68,6 +70,7 @@ export const Config: z<Config> = z.object({
   turnTimeoutMs: z.number().min(1).default(900_000),
   pollRetryMs: z.number().min(1).default(86_400_000),
   fileRetentionDays: z.number().min(1).default(90),
+  chatLogMaxEntries: z.number().min(1).default(15_000),
   retry: z.object({
     maxAttempts: z.number().min(1).default(4),
     startDelayMs: z.number().min(0).default(500),
