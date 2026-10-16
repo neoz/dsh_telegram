@@ -1,0 +1,2 @@
+# dsh-chat bundle layer: no rows of its own; each channel adapter's patch inserts the dsh-chat plugins it uses.
+[]

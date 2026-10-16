@@ -1,0 +1,10 @@
+{
+  "name": "dsh-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm --filter dsh-chat run build && pnpm -r run typecheck",
+    "test": "pnpm --filter dsh-chat run build && pnpm -r run test"
+  }
+}

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { oneLine } from './chatlog.ts'
-import { SerialQueue, writeJsonAtomic } from './json-file.ts'
+import { SerialQueue, writeJsonAtomic } from 'dsh-chat'
 import { pathSafe } from './media.ts'
 
 /** `chat` is the memory of one conversation (a private chat or a group); `global` is shared by every chat. */

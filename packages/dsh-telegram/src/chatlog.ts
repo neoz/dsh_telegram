@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { SerialQueue, writeFileAtomic } from './json-file.ts'
+import { SerialQueue, writeFileAtomic } from 'dsh-chat'
 
 /** One observed Telegram message; bot replies carry `bot: true`, messages that got a turn carry `handled: true`. */
 export interface ChatLogEntry {

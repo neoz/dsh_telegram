@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { decodeScheduleRecord } from '@deepseek-ai/dsh-schedule'
-import { writeJsonAtomic } from '../json-file.ts'
+import { writeJsonAtomic } from 'dsh-chat'
 import type { Reminder } from './domain.ts'
 
 interface ScheduleFile { version: 1; reminders: Reminder[] }

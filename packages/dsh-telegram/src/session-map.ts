@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { SerialQueue, writeJsonAtomic } from './json-file.ts'
+import { SerialQueue, writeJsonAtomic } from 'dsh-chat'
 
 export interface ChatSessionRecord {
   sessionId: string
