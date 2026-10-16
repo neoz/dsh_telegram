@@ -53,6 +53,10 @@ async function add(id: string, timing: Parameters<typeof buildRecord>[3], extra:
   await book.update('telegram', list => list.push(reminder))
 }
 const sentTexts = () => telegram.sent.map(s => s.text)
+/** Lets real file writes finish while fake timers hold the clock: spins the event loop until `done` holds. */
+async function settle(done: () => boolean): Promise<void> {
+  for (let i = 0; i < 10_000 && !done(); i++) await new Promise(resolve => setImmediate(resolve))
+}
 
 describe('startScheduler', () => {
   it('sends a due message reminder, logs it, and drops a one-shot', async () => {
@@ -125,9 +129,51 @@ describe('startScheduler', () => {
     expect(telegram.sent).toEqual([])
     expect(warns[0]).toMatch(/telegram:5 reminder a failed: .*offline/)
     online = true
+    // A failed reminder waits out the retry delay before it is tried again.
+    await s.tick()
+    expect(telegram.sent).toEqual([])
+    now += 60_000
     await s.tick()
     expect(sentTexts()).toEqual(['\u{23F0} Ta\npa'])
     expect(book.all()).toEqual([])
+    s.stop()
+  })
+
+  it('an overdue reminder of an offline channel does not hold back another channel', async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const stale = buildRecord('z', 'Tz', 'pz', { after_seconds: 60 }, NOW - 120_000, 'UTC')
+    await book.update('zalo', list => list.push({ chatKey: 'zalo:c1', isGroup: false, creator: { id: 'zalo:u1', name: 'U' }, mode: 'message', record: stale }))
+    await book.update('telegram', list => list.push({
+      chatKey: 'telegram:5', isGroup: false, creator: { id: 'telegram:7', name: '@ann' }, mode: 'message', record: buildRecord('t', 'Tt', 'pt', { after_seconds: 90 }, NOW - 60_000, 'UTC'),
+    }))
+    const s = startScheduler({
+      book, chat: { channel: id => (id === 'telegram' ? telegram : undefined), prompt: () => {}, superAdmins }, chatLog,
+      log: { info: m => infos.push(m), warn: m => warns.push(m) }, now: () => Date.now(),
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    await settle(() => warns.length === 1)
+    expect(warns.filter(w => w.includes('zalo:c1'))).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(30_000)
+    await settle(() => infos.includes('dsh-chat: telegram:5 reminder t -> message'))
+    expect(sentTexts()).toEqual(['\u{23F0} Tt\npt'])
+    await vi.advanceTimersByTimeAsync(30_000)
+    await settle(() => warns.length === 2)
+    expect(warns.filter(w => w.includes('zalo:c1'))).toHaveLength(2)
+    expect(book.all().map(r => r.chatKey)).toEqual(['zalo:c1'])
+    s.stop()
+  })
+
+  it('puts a reminder back when its channel goes away between advancing it and sending', async () => {
+    await add('a', { after_seconds: 60 })
+    let lookups = 0
+    const s = startScheduler({
+      book, chat: { channel: () => (++lookups === 1 ? telegram : undefined), prompt: () => {}, superAdmins }, chatLog,
+      log: { info: m => infos.push(m), warn: m => warns.push(m) }, now: () => now,
+    })
+    now = NOW + 60_000
+    await s.tick()
+    expect(telegram.sent).toEqual([])
+    expect(book.all().map(r => [r.record.id, r.record.scheduledAt])).toEqual([['a', new Date(NOW + 60_000).toISOString()]])
     s.stop()
   })
 
@@ -204,10 +250,9 @@ describe('startScheduler', () => {
 
   it('waits a minute before retrying after a failed delivery instead of spinning', async () => {
     await add('a', { after_seconds: 60 })
-    now = NOW + 60_000
     const update = vi.spyOn(book, 'update').mockRejectedValue(new Error('disk full'))
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const s = scheduler()
+    vi.useFakeTimers({ now: NOW + 60_000, toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const s = startScheduler({ book, chat: { channel: () => telegram, prompt: () => {}, superAdmins }, chatLog, log: { info: () => {}, warn: () => {} }, now: () => Date.now() })
     await vi.advanceTimersByTimeAsync(1_000)
     expect(update).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(60_000)

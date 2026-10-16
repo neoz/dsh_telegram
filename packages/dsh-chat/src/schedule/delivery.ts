@@ -1,12 +1,12 @@
 import { idIn, splitKey } from '../keys.ts'
 import type { ChatLog } from '../log/chatlog.ts'
 import type { ChatRouter } from '../router/router.ts'
-import { afterDelivery, agentPrompt, dueReminders, nextDueAt, reminderMessage, type Reminder } from './domain.ts'
+import { afterDelivery, agentPrompt, reminderMessage, type Reminder } from './domain.ts'
 import type { ReminderBook } from './store.ts'
 
 /** Node keeps timers in a signed 32-bit millisecond field; longer waits are re-armed in steps. */
 const MAX_DELAY_MS = 2_147_483_647
-/** After a failed delivery (e.g. the store cannot be written) the timer waits this long instead of firing again at once. */
+/** After a failed delivery (e.g. the store cannot be written) that reminder waits this long instead of firing again at once. */
 const RETRY_AFTER_FAILURE_MS = 60_000
 
 export interface SchedulerDeps {
@@ -26,6 +26,7 @@ export interface SchedulerHandle {
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const keyOf = (reminder: Reminder) => `${reminder.chatKey}/${reminder.record.id}`
 
 export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   const { book, chat, log } = deps
@@ -33,13 +34,21 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   let timer: NodeJS.Timeout | undefined
   let stopped = false
   let running: Promise<void> = Promise.resolve()
+  /** When a reminder whose delivery failed may be tried again; the others keep their own times. */
+  const retryAt = new Map<string, number>()
 
-  const arm = (minDelayMs = 0): void => {
+  /** A reminder is due at its scheduled time, or later while it waits out a failure. */
+  const dueAt = (reminder: Reminder) => Math.max(Date.parse(reminder.record.scheduledAt), retryAt.get(keyOf(reminder)) ?? 0)
+
+  const arm = (): void => {
     if (timer !== undefined) clearTimeout(timer)
     timer = undefined
-    const at = nextDueAt(book.all())
-    if (stopped || at === undefined) return
-    timer = setTimeout(() => { void tick() }, Math.min(Math.max(at - now(), minDelayMs), MAX_DELAY_MS))
+    const reminders = book.all()
+    const live = new Set(reminders.map(keyOf))
+    for (const key of retryAt.keys()) if (!live.has(key)) retryAt.delete(key)
+    if (stopped || reminders.length === 0) return
+    const at = Math.min(...reminders.map(dueAt))
+    timer = setTimeout(() => { void tick() }, Math.min(Math.max(at - now(), 0), MAX_DELAY_MS))
   }
 
   /** Advances or drops the reminder first, then sends: a crash in between loses one delivery, never duplicates it. */
@@ -62,7 +71,15 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
     const reminder = due
     if (reminder === undefined) return
     const channel = chat.channel(channelId)
-    if (channel === undefined) throw new Error(`channel ${channelId} offline`)
+    if (channel === undefined) {
+      // The channel went away after the reminder was advanced (a shutdown): put it back as it was, so it is not lost.
+      await book.update(channelId, (reminders) => {
+        const index = reminders.findIndex(r => r.chatKey === reminder.chatKey && r.record.id === reminder.record.id)
+        if (index < 0) reminders.push(reminder)
+        else reminders[index] = reminder
+      })
+      throw new Error(`channel ${channelId} offline`)
+    }
     if (revoked) {
       await channel.send(chatId, `Stopped reminder "${reminder.record.title}": its creator is no longer a super admin.`)
     } else if (reminder.mode === 'message') {
@@ -84,19 +101,20 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   }
 
   const tick = (): Promise<void> => {
-    let failed = false
     running = running.then(async () => {
-      for (const reminder of dueReminders(book.all(), now())) {
+      const due = book.all().filter(r => dueAt(r) <= now()).sort((a, b) => dueAt(a) - dueAt(b))
+      for (const reminder of due) {
         if (stopped) return
         try {
           await deliver(reminder)
+          retryAt.delete(keyOf(reminder))
         } catch (error) {
-          failed = true
+          retryAt.set(keyOf(reminder), now() + RETRY_AFTER_FAILURE_MS)
           if (stopped) return
           log.warn(`dsh-chat: ${reminder.chatKey} reminder ${reminder.record.id} failed: ${errorText(error)}`)
         }
       }
-    }).finally(() => arm(failed ? RETRY_AFTER_FAILURE_MS : 0))
+    }).finally(() => arm())
     return running
   }
 
