@@ -12,7 +12,12 @@ export interface ZaloMessage {
   /** Milliseconds since the epoch. */
   date: number
   text?: string
+  /** Photo URL; Zalo really sends it as `photo_url`, which `normalizeUpdate` maps here. */
   photo?: string
+  /** What Zalo actually sends for `photo`, despite its docs. */
+  photo_url?: string
+  /** e.g. `CHAT_PHOTO`; undocumented. */
+  message_type?: string
   caption?: string
   sticker?: string
   url?: string
@@ -27,7 +32,7 @@ export function isGroupChat(chat: ZaloMessage['chat']): boolean {
 }
 
 const DOCUMENTED_UPDATE = new Set(['event_name', 'message'])
-const DOCUMENTED_MESSAGE = new Set(['from', 'chat', 'message_id', 'date', 'text', 'photo', 'caption', 'sticker', 'url', 'voice_url'])
+const DOCUMENTED_MESSAGE = new Set(['from', 'chat', 'message_id', 'date', 'text', 'photo', 'photo_url', 'message_type', 'caption', 'sticker', 'url', 'voice_url'])
 
 /** Fields Zalo sent that its docs do not list (a quoted message, say); undefined when there are none. */
 export function undocumentedFields(update: ZaloUpdate): Record<string, unknown> | undefined {
@@ -40,7 +45,7 @@ export function undocumentedFields(update: ZaloUpdate): Record<string, unknown> 
 
 const idString = (value: unknown) => (typeof value === 'number' ? String(value) : value)
 
-/** Ids as strings whatever type Zalo sends them in; an update without a message passes through for the poller to skip. */
+/** Ids as strings whatever type Zalo sends them in, and the photo under `photo` whichever field carried it; an update without a message passes through for the poller to skip. */
 function normalizeUpdate(update: ZaloUpdate): ZaloUpdate {
   const { message } = update
   if (message === undefined || message === null) return update
@@ -49,6 +54,7 @@ function normalizeUpdate(update: ZaloUpdate): ZaloUpdate {
     message: {
       ...message,
       message_id: idString(message.message_id) as string,
+      ...(message.photo === undefined && message.photo_url !== undefined ? { photo: message.photo_url } : {}),
       ...(message.from === undefined ? {} : { from: { ...message.from, id: idString(message.from.id) as string } }),
       ...(message.chat === undefined ? {} : { chat: { ...message.chat, id: idString(message.chat.id) as string } }),
     },

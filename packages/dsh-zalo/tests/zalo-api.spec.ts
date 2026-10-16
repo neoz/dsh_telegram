@@ -115,6 +115,19 @@ describe('createZaloApi', () => {
   })
 })
 
+describe('photo field', () => {
+  it('reads the photo from photo_url, which Zalo really sends, as well as the documented photo', async () => {
+    const real = { event_name: 'message.image.received', message: { message_id: 'm1', date: 1, from: { id: 'u' }, chat: { id: 'c', chat_type: 'PRIVATE' }, message_type: 'CHAT_PHOTO', photo_url: 'https://z/p.jpg' } }
+    const documented = { event_name: 'message.image.received', message: { message_id: 'm2', date: 1, from: { id: 'u' }, chat: { id: 'c', chat_type: 'PRIVATE' }, photo: 'https://z/q.jpg' } }
+    const api = createZaloApi('T', retry, (async () => json({ ok: true, result: [real, documented] })) as never)
+    expect((await api.getUpdates(1)).map(u => u.message.photo)).toEqual(['https://z/p.jpg', 'https://z/q.jpg'])
+  })
+
+  it('treats photo_url and message_type as known fields', () => {
+    expect(undocumentedFields({ event_name: 'message.image.received', message: { message_id: 'm', date: 1, from: { id: 'u' }, chat: { id: 'c', chat_type: 'GROUP' }, message_type: 'CHAT_PHOTO', photo_url: 'p' } } as never)).toBeUndefined()
+  })
+})
+
 describe('undocumentedFields', () => {
   it('returns only the fields the Zalo docs do not list, on the update and on its message', () => {
     const update = {
