@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createDispatcher } from '../../src/bot.ts'
-import { chatKey, ChatLog, type ChatLogEntry } from 'dsh-chat'
+import { ChatQueue, chatKey, ChatLog, type ChatLogEntry } from 'dsh-chat'
 import { Config } from '../../src/idle/index.ts'
 import { startIdle, type IdleDeps, type IdleEvent, type IdleHandle } from '../../src/idle/scheduler.ts'
 import { FakeTelegramApi } from '../helpers/fake-api.ts'
@@ -71,9 +70,10 @@ const checks = () => events.filter(e => e.event === 'check').map(e => (e as { ve
 const decisions = () => events.filter(e => e.event === 'decision').map(({ ts: _ts, chatId: _chat, event: _event, ...rest }) => rest)
 
 describe('startIdle', () => {
-  it('engages when the lines arrive from inside the real dispatcher queue, as they do in production', async () => {
-    // Every human line is written by a dispatcher task, so the chat's queue is busy while telegram/message fires.
-    const dispatcher = createDispatcher({ log: { info: () => {}, warn: () => {}, error: () => {} } } as never)
+  it('engages when the lines arrive from inside the real chat queue, as they do in production', async () => {
+    // Every human line is written by a queued task, so the chat's queue is busy while telegram/message fires.
+    const chatQueue = new ChatQueue(() => {})
+    const dispatcher = { enqueue: (chatId: number, task: () => Promise<void>) => chatQueue.enqueue(String(chatId), task) }
     const idle = start(undefined, { queue: dispatcher })
     await idle.ready
     for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) dispatcher.enqueue(CHAT, () => say(idle, human(i + 1, m)))

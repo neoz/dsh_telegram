@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { extname } from 'node:path'
-import type { ImageStore } from '../bot.ts'
-import { chatKey, type ChatLog, type ChatLogEntry } from 'dsh-chat'
+import { chatKey, type ChatLog, type ChatLogEntry, type ImageStore } from 'dsh-chat'
 import type { TelegramApi } from '../telegram-api.ts'
 import { dayKey, emptyChatState, evaluate, observe, type ChatIdleState, type CheckVerdict, type Evaluation } from './burst.ts'
 import { decide, idleSystemPrompt, type IdleAction, type IdleLlm, type IdlePhoto } from './engage.ts'

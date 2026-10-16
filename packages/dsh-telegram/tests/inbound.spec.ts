@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { displayName, hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, stripBotMention, type TelegramMessage } from '../src/inbound.ts'
+import { displayName, hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, stripBotMention, toInbound, type TelegramMessage } from '../src/inbound.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
 
 let dir: string
@@ -141,5 +141,40 @@ describe('parseInbound', () => {
     const got = await parseInbound(msg({ text: 'more', reply_to_message: botQuoted }), options())
     expect(api.callsTo('downloadFile')).toHaveLength(0)
     expect(got.text).toBe('> assistant: answer\n\nmore')
+  })
+})
+
+describe('toInbound', () => {
+  const deps = () => ({ api, botId: 1, botUsername: 'dshbot', inboxFor: () => join(dir, 'inbox'), log: { warn: () => {} } })
+  const mention = [{ type: 'mention', offset: 0, length: 7 }]
+
+  it('drops messages without a sender and from bots', () => {
+    expect(toInbound({ ...msg({ text: 'hi' }), from: undefined }, deps())).toBeUndefined()
+    expect(toInbound(msg({ text: 'hi', from: { ...ann, is_bot: true } }), deps())).toBeUndefined()
+  })
+
+  it('keys the chat, keeps the sender channel-neutral and dates the message', () => {
+    expect(toInbound(msg({ text: 'hi' }), deps())).toMatchObject({
+      chatKey: 'telegram:5', messageId: '10', sender: { id: '7', name: 'Ann', username: 'ann' }, isGroup: false, addressed: true, at: 1_700_000_000_000,
+    })
+  })
+
+  it('addresses a group message by mention or reply to the bot only', () => {
+    expect(toInbound(msg({ text: 'hello' }, 'supergroup'), deps())!.addressed).toBe(false)
+    expect(toInbound(msg({ text: '@dshbot hi', entities: mention }, 'supergroup'), deps())!.addressed).toBe(true)
+    expect(toInbound(msg({ caption: '@dshbot hi', caption_entities: mention }, 'supergroup'), deps())!.addressed).toBe(true)
+    expect(toInbound(msg({ text: 'yes', reply_to_message: { ...msg({ text: 'q' }), from: { id: 1, is_bot: true, first_name: 'dsh' } } }, 'supergroup'), deps())!.addressed).toBe(true)
+  })
+
+  it('normalizes a command addressed to this bot and leaves one for another bot alone', () => {
+    expect(toInbound(msg({ text: '/stop@dshbot' }), deps())!.text).toBe('/stop')
+    expect(toInbound(msg({ text: '/reset' }), deps())!.text).toBe('/reset')
+    expect(toInbound(msg({ text: '/stop@other' }), deps())!.text).toBe('/stop@other')
+  })
+
+  it('loads the log line in log mode and the turn text in turn mode', async () => {
+    const m = toInbound(msg({ text: 'hi' }), deps())!
+    expect(await m.load('log')).toMatchObject({ logEntry: { message_id: '10', text: 'hi' }, text: '', images: [] })
+    expect((await m.load('turn')).text).toBe('hi')
   })
 })

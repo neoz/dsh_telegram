@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
-import type { ChatLogEntry } from 'dsh-chat'
+import { chatKey, type ChatLogEntry, type InboundMessage as ChatInbound } from 'dsh-chat'
 import { sanitizeFilename } from './media.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
@@ -174,4 +174,52 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
   }
 
   return { chatId: message.chat.id, messageId: message.message_id, isGroup, sender, text, images, savedFiles, logEntry: logEntryFor(message, savedFiles) }
+}
+
+export interface ToInboundDeps {
+  api: TelegramApi
+  botId: number
+  botUsername: string
+  inboxFor(chatId: number): string
+  log: { warn(msg: string): void }
+}
+
+/** `/cmd@thisbot` becomes `/cmd`; a command for another bot stays as typed, so the core never runs it. */
+function commandText(text: string | undefined, botUsername: string): string {
+  const match = /^\/(reset|stop|help)(?:@(\w+))?\s*$/.exec(text ?? '')
+  if (match !== null && (match[2] === undefined || match[2].toLowerCase() === botUsername.toLowerCase())) return `/${match[1]}`
+  return text ?? ''
+}
+
+/** Normalizes one Telegram message for the chat core; undefined for messages the core never sees. */
+export function toInbound(message: TelegramMessage, deps: ToInboundDeps): ChatInbound | undefined {
+  const sender = message.from
+  if (sender === undefined || sender.is_bot) return undefined
+  const isGroup = message.chat.type !== 'private'
+  const addressed = !isGroup
+    || hasBotMention(message.text, message.entities, deps.botUsername)
+    || hasBotMention(message.caption, message.caption_entities, deps.botUsername)
+    || message.reply_to_message?.from?.id === deps.botId
+  return {
+    chatKey: chatKey('telegram', message.chat.id),
+    messageId: String(message.message_id),
+    sender: { id: String(sender.id), name: sender.first_name, ...(sender.username === undefined ? {} : { username: sender.username }) },
+    isGroup,
+    addressed,
+    text: commandText(message.text, deps.botUsername),
+    // Telegram stamps `date` when the sender hit send.
+    at: message.date * 1000,
+    async load(mode) {
+      const inboxDir = deps.inboxFor(message.chat.id)
+      if (mode === 'log') {
+        const saved = await saveObservedPhoto(message, deps.api, inboxDir).catch((error: unknown) => {
+          deps.log.warn(`dsh-telegram: saving photo of message ${message.message_id} in chat ${message.chat.id} failed: ${error instanceof Error ? error.message : String(error)}`)
+          return []
+        })
+        return { logEntry: logEntryFor(message, saved), text: '', images: [] }
+      }
+      const parsed = await parseInbound(message, { api: deps.api, inboxDir, botId: deps.botId, botUsername: deps.botUsername })
+      return { logEntry: parsed.logEntry, text: parsed.text, images: parsed.images }
+    },
+  }
 }

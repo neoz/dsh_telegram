@@ -1,4 +1,3 @@
-import type { Dispatcher, PromptInput } from './bot.ts'
 import type { ChatLog, ChatLogEntry, TurnContext } from 'dsh-chat'
 import type { TelegramUser } from './inbound.ts'
 import type { TelegramApi } from './telegram-api.ts'
@@ -12,13 +11,15 @@ export function telegramTurn(turn: TurnContext | undefined): TelegramTurn | unde
   return { isGroup: turn.isGroup, sender: { id: Number(id), is_bot: false, first_name: name, ...(username === undefined ? {} : { username }) } }
 }
 
-/** The running bot, shared with extension plugins such as `dsh-telegram/idle`; provided only while the bot polls. */
+export interface PromptInput { text: string; sender: TelegramUser }
+
+/** Telegram view of the chat router for `dsh-telegram/idle` and `dsh-telegram/schedule`; provided only while the bot polls. */
 export interface TelegramService {
   readonly api: TelegramApi
   /** The shared dsh-chat log, keyed by `telegram:<chatId>`. */
   readonly chatLog: ChatLog
-  /** Per-chat queue shared with message handling; tasks of one chat never overlap. */
-  readonly queue: Pick<Dispatcher, 'enqueue' | 'isBusy'>
+  /** The router's per-chat queue; tasks of one chat never overlap. */
+  readonly queue: { enqueue(chatId: number, task: () => Promise<void>): void; isBusy(chatId: number): boolean }
   readonly bot: { readonly id: number; readonly username: string }
   readonly selection: { readonly provider: string; readonly model: string }
   /** Where plugins keep their own durable files. */
