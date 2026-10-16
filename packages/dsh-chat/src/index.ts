@@ -2,3 +2,5 @@ export { chatKey, idIn, keyPath, pathSafe, splitKey, type ChatKey } from './keys
 export { SerialQueue, writeFileAtomic, writeJsonAtomic } from './json-file.ts'
 export { ChatLog, formatEntry, oneLine, senderLabel, type ChatLogEntry } from './log/chatlog.ts'
 export type { ChatData } from './migrate/index.ts'
+export { formatMemoryEntry, MemoryStore, renderMemoryBlock, type MemoryEntry, type MemoryLimits, type MemoryScope } from './memory/store.ts'
+export type { ChatSender, TurnContext } from './sessions/agents.ts'

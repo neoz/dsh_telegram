@@ -2,14 +2,14 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { MemoryStore, formatMemoryEntry, renderMemoryBlock } from '../src/memory.ts'
+import { MemoryStore, formatMemoryEntry, renderMemoryBlock } from '../../src/memory/store.ts'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'memory-')) })
 afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 
 const limits = { maxEntries: 3, maxGlobalEntries: 2, maxEntryChars: 20 }
-const chat = { kind: 'chat', chatId: 5 } as const
+const chat = { kind: 'chat', key: 'telegram:5' } as const
 const global = { kind: 'global' } as const
 
 describe('MemoryStore', () => {
@@ -59,10 +59,10 @@ describe('MemoryStore', () => {
   it('keeps chat scopes independent of each other and of global', async () => {
     const store = new MemoryStore(dir, limits)
     await store.save(chat, 'five')
-    await store.save({ kind: 'chat', chatId: 6 }, 'six')
+    await store.save({ kind: 'chat', key: 'telegram:6' }, 'six')
     await store.save(global, 'everyone')
     expect((await store.list(chat)).map(e => e.text)).toEqual(['five'])
-    expect((await store.list({ kind: 'chat', chatId: 6 })).map(e => e.text)).toEqual(['six'])
+    expect((await store.list({ kind: 'chat', key: 'telegram:6' })).map(e => e.text)).toEqual(['six'])
     expect((await store.list(global)).map(e => e.text)).toEqual(['everyone'])
   })
 
@@ -70,8 +70,9 @@ describe('MemoryStore', () => {
     const store = new MemoryStore(dir, limits)
     await store.save(chat, 'x')
     await store.save(global, 'y')
-    expect((await readdir(dir)).sort()).toEqual(['5.json', 'global.json'])
-    expect(JSON.parse(await readFile(join(dir, '5.json'), 'utf8'))).toEqual({
+    expect((await readdir(join(dir, 'telegram', 'memory'))).sort()).toEqual(['5.json'])
+    expect((await readdir(join(dir, 'memory'))).sort()).toEqual(['global.json'])
+    expect(JSON.parse(await readFile(join(dir, 'telegram', 'memory', '5.json'), 'utf8'))).toEqual({
       nextId: 2,
       entries: [{ id: 1, text: 'x', ts: expect.any(String) }],
     })
@@ -102,5 +103,22 @@ describe('formatMemoryEntry / renderMemoryBlock', () => {
 
   it('folds line breaks inside an entry', () => {
     expect(formatMemoryEntry(e(4, 'a\nb'))).toBe('[#4] a b')
+  })
+})
+
+describe('byte-identical rendering', () => {
+  it('renders the memory block exactly as before the move', () => {
+    const e = (id: number, text: string) => ({ id, text, ts: 't' })
+    expect(renderMemoryBlock([e(1, 'likes tea'), e(2, 'two\nlines')], [e(3, 'team is DSH')]))
+      .toBe('<memory>\n[Memory of this conversation]\n- [#1] likes tea\n- [#2] two lines\n\n[Global memory]\n- [#3] team is DSH\n</memory>')
+    expect(renderMemoryBlock([], [])).toBe('')
+  })
+
+  it('shares one global file across channels', async () => {
+    const store = new MemoryStore(dir, { maxEntries: 5, maxGlobalEntries: 5, maxEntryChars: 200 })
+    await store.save({ kind: 'global' }, 'shared')
+    await store.save({ kind: 'chat', key: 'zalo:a' }, 'z only')
+    expect((await store.list({ kind: 'global' })).map(e => e.text)).toEqual(['shared'])
+    expect(await store.list({ kind: 'chat', key: 'telegram:a' })).toEqual([])
   })
 })
