@@ -8,7 +8,7 @@ import { createZaloChannel } from './channel.ts'
 import { Config } from './config.ts'
 import { toInbound } from './inbound.ts'
 import { startPolling, type Poller } from './poller.ts'
-import { createZaloApi } from './zalo-api.ts'
+import { createZaloApi, undocumentedFields } from './zalo-api.ts'
 
 export { Config } from './config.ts'
 export type { Config as ZaloConfig } from './config.ts'
@@ -44,6 +44,9 @@ async function start(ctx: Context, config: Config): Promise<Started> {
     api,
     timeoutSec: config.pollTimeoutSec,
     onUpdate: (update) => {
+      // Zalo documents no quote or reply field; this shows what it really sends, e.g. for a message quoting a photo.
+      const extra = undocumentedFields(update)
+      if (extra !== undefined) log.info(`dsh-zalo: update ${update.message?.message_id ?? '?'} (${update.event_name}) has undocumented fields ${JSON.stringify(extra).slice(0, 4000)}`)
       const inbound = toInbound(update, {
         ...trigger, api, botId: me.id, log,
         inboxFor: chatId => join(ctx.chatAgents.workspaceFor(chatKey('zalo', chatId)), 'inbox'),

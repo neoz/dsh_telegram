@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createZaloApi, ZaloApiError } from '../src/zalo-api.ts'
+import { createZaloApi, undocumentedFields, ZaloApiError } from '../src/zalo-api.ts'
 
 const retry = { maxAttempts: 3, startDelayMs: 0, maxDelayMs: 0 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
@@ -112,5 +112,20 @@ describe('createZaloApi', () => {
     expect((await api.downloadUrl('https://img')).toString()).toBe('abc')
     const missing = createZaloApi('T', retry, (async () => new Response('', { status: 404 })) as never)
     await expect(missing.downloadUrl('https://img')).rejects.toThrow(/HTTP 404/)
+  })
+})
+
+describe('undocumentedFields', () => {
+  it('returns only the fields the Zalo docs do not list, on the update and on its message', () => {
+    const update = {
+      event_name: 'message.text.received',
+      extra_top: 1,
+      message: { message_id: 'm', date: 1, from: { id: 'u' }, chat: { id: 'c', chat_type: 'GROUP' }, text: 'hi', quote: { text: 'old', photo: 'https://x' } },
+    } as never
+    expect(undocumentedFields(update)).toEqual({ extra_top: 1, message: { quote: { text: 'old', photo: 'https://x' } } })
+  })
+
+  it('returns undefined for a documented update', () => {
+    expect(undocumentedFields({ event_name: 'message.image.received', message: { message_id: 'm', date: 1, from: { id: 'u' }, chat: { id: 'c', chat_type: 'PRIVATE' }, photo: 'p', caption: 'c' } } as never)).toBeUndefined()
   })
 })

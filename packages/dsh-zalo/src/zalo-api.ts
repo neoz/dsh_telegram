@@ -26,6 +26,18 @@ export function isGroupChat(chat: ZaloMessage['chat']): boolean {
   return String(chat.chat_type).toUpperCase() !== 'PRIVATE'
 }
 
+const DOCUMENTED_UPDATE = new Set(['event_name', 'message'])
+const DOCUMENTED_MESSAGE = new Set(['from', 'chat', 'message_id', 'date', 'text', 'photo', 'caption', 'sticker', 'url', 'voice_url'])
+
+/** Fields Zalo sent that its docs do not list (a quoted message, say); undefined when there are none. */
+export function undocumentedFields(update: ZaloUpdate): Record<string, unknown> | undefined {
+  const pick = (value: object, known: Set<string>) => Object.fromEntries(Object.entries(value).filter(([key]) => !known.has(key)))
+  const top = pick(update, DOCUMENTED_UPDATE)
+  const inner = update.message === undefined || update.message === null ? {} : pick(update.message, DOCUMENTED_MESSAGE)
+  const found = { ...top, ...(Object.keys(inner).length === 0 ? {} : { message: inner }) }
+  return Object.keys(found).length === 0 ? undefined : found
+}
+
 const idString = (value: unknown) => (typeof value === 'number' ? String(value) : value)
 
 /** Ids as strings whatever type Zalo sends them in; an update without a message passes through for the poller to skip. */
