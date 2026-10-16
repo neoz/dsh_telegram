@@ -24,13 +24,9 @@ async function names(dir: string): Promise<string[]> {
   }
 }
 
-/** Renames `from` to `to` unless `to` is already there (an earlier run got that far); then the source is a leftover copy. */
+/** Renames `from` to `to`; when `to` already exists (written by something else), both stay, so nothing is ever deleted. */
 async function move(from: string, to: string): Promise<void> {
-  if (!(await exists(from))) return
-  if (await exists(to)) {
-    await fs.rm(from, { recursive: true, force: true })
-    return
-  }
+  if (!(await exists(from)) || await exists(to)) return
   await fs.mkdir(dirname(to), { recursive: true })
   await fs.rename(from, to)
 }
@@ -43,7 +39,13 @@ async function stringifyLogIds(dir: string): Promise<void> {
     const lines = (await fs.readFile(file, 'utf8')).split('\n').filter(line => line !== '')
     let changed = false
     const out = lines.map((line) => {
-      const entry = JSON.parse(line) as Record<string, unknown>
+      let entry: Record<string, unknown>
+      try {
+        entry = JSON.parse(line) as Record<string, unknown>
+      } catch {
+        // A line cut short by a crash stays as it was; it must not keep every chat down.
+        return line
+      }
       for (const field of ['message_id', 'user_id', 'reply_to']) {
         if (typeof entry[field] === 'number') {
           entry[field] = String(entry[field])
@@ -73,8 +75,9 @@ export async function migrate(options: MigrateOptions): Promise<'current' | 'mig
     for (const name of ['idle-decisions.jsonl', 'schedule.json']) await move(join(dataDir, name), join(target, name))
     // Stored sessions keep their old cwd, so every chat starts a new session; memory and chat log carry the continuity.
     await fs.rm(join(dataDir, `${channel}-sessions.json`), { force: true })
+    // Only chat folders move: the workspace root may hold anything else (a cloned repo, a cache, the data dir).
     for (const name of await names(workspaceRoot)) {
-      if (name === channel) continue
+      if (!(await exists(join(target, 'chatlog', `${name}.jsonl`)))) continue
       const from = join(workspaceRoot, name)
       if ((await fs.stat(from)).isDirectory()) await move(from, join(workspaceRoot, channel, name))
     }
