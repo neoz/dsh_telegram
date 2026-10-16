@@ -6,3 +6,8 @@ export { formatMemoryEntry, MemoryStore, renderMemoryBlock, type MemoryEntry, ty
 export type { ChatSender, TurnContext } from './sessions/agents.ts'
 export { ChatAgents, type AgentRegistryLike, type ModelRoute, type ResolvedAgent } from './sessions/agents.ts'
 export { SessionMap, type ChatSessionRecord } from './sessions/session-map.ts'
+export type { ChatChannel, Delivered, ImageMediaType, InboundImage, InboundMessage, LoadedMessage, PromptInput, TurnReport, TurnSink } from './router/channel.ts'
+export { ChatQueue } from './router/queue.ts'
+export { ChatRouter, commandOf, HELP_TEXT, type ImageStore, type RouterConfig } from './router/router.ts'
+export { runAgentTurn, summarizeTurn, type AgentTurnResult, type SessionEventFeed, type TurnAgent } from './router/turn.ts'
+export { apply, assertRouterConfig, Config, inject, name } from './router/plugin.ts'
