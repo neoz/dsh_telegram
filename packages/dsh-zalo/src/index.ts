@@ -2,29 +2,23 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-attachment'
-import type {} from '@deepseek-ai/dsh-tools'
-import { idIn } from 'dsh-chat'
-import type {} from 'dsh-chat/log'
-import type {} from 'dsh-chat/memory'
-import type {} from 'dsh-chat/migrate'
+import { chatKey } from 'dsh-chat'
 import type {} from 'dsh-chat/sessions'
-import { createDispatcher, type Dispatcher } from './bot.ts'
-import { assertConfig, Config } from './config.ts'
-import { SeenIds, startPolling, type Poller } from './poller.ts'
-import type { ZaloService } from './service.ts'
+import { createZaloChannel } from './channel.ts'
+import { Config } from './config.ts'
+import { toInbound } from './inbound.ts'
+import { startPolling, type Poller } from './poller.ts'
 import { createZaloApi } from './zalo-api.ts'
 
 export { Config } from './config.ts'
 export type { Config as ZaloConfig } from './config.ts'
-export type { ZaloService } from './service.ts'
 
 /** Cordis plugin name. */
 export const name = 'dsh-zalo'
-/** Services required before the bot starts; the stores come from the dsh-chat plugins. */
-export const inject = ['attachments', 'loader', 'chatData', 'chatLog', 'chatMemory', 'chatAgents']
+/** The router and stores come from the dsh-chat plugins. */
+export const inject = ['loader', 'chatAgents', 'chat']
 
-interface Started { poller: Poller; dispatcher: Dispatcher; service: ZaloService }
+interface Started { poller: Poller; unregister: () => void }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -43,45 +37,24 @@ async function start(ctx: Context, config: Config): Promise<Started> {
 
   const api = createZaloApi(config.botToken, config.retry, fetch, config.maxDownloadMb * 1024 * 1024)
   const me = await api.getMe()
-
-  const chatLog = ctx.chatLog
-  const agents = ctx.chatAgents
-
-  const dispatcher = createDispatcher({
-    api,
-    config,
-    chatLog,
-    memory: ctx.chatMemory,
-    agents,
-    attachments: ctx.attachments,
-    bot: me,
-    log,
-    noteTurn: chatId => ctx.emit('zalo/turn', chatId),
-    strangers: new SeenIds(1000),
-  })
+  // Registered before polling starts, so the first update never finds the channel offline.
+  const unregister = ctx.chat.register(createZaloChannel({ api, bot: me, config, log }))
+  const trigger = { accountName: me.accountName, ...(me.displayName === undefined ? {} : { displayName: me.displayName }), groupPrefix: config.groupPrefix }
   const poller = startPolling({
     api,
     timeoutSec: config.pollTimeoutSec,
-    onUpdate: update => dispatcher.dispatch(update),
+    onUpdate: (update) => {
+      const inbound = toInbound(update, {
+        ...trigger, api, botId: me.id, log,
+        inboxFor: chatId => join(ctx.chatAgents.workspaceFor(chatKey('zalo', chatId)), 'inbox'),
+      })
+      if (inbound !== undefined) ctx.chat.inbound(inbound)
+    },
     backoff: { startDelayMs: config.retry.startDelayMs, maxDelayMs: config.retry.maxDelayMs },
     log,
   })
   log.info(`dsh-zalo: polling as ${me.accountName}`)
-  return {
-    poller,
-    dispatcher,
-    service: {
-      api,
-      chatLog,
-      queue: dispatcher,
-      bot: me,
-      dataDir: join(ctx.chatData.dataDir, 'zalo'),
-      chatOf: (agentId) => {
-        const key = agents.chatOf(agentId)
-        return key === undefined ? undefined : idIn('zalo', key)
-      },
-    },
-  }
+  return { poller, unregister }
 }
 
 /**
@@ -115,26 +88,17 @@ export function retryStart<T>(
 const STARTUP_BACKOFF = { startDelayMs: 5_000, maxDelayMs: 300_000 }
 
 export function apply(ctx: Context, config: Config): void {
-  assertConfig(config)
   const log = loggerFor(ctx)
-  // Extension plugins listen to zalo/message until they move to dsh-chat.
-  ctx.on('chat/message', (key, entry) => {
-    const id = idIn('zalo', key)
-    if (id !== undefined) ctx.emit('zalo/message', id, entry)
-  })
   let started: Started | undefined
-  let revoke: (() => void) | undefined
   let stopped = false
   ctx.effect(() => {
     const cancel = retryStart(() => start(ctx, config), (result) => {
       if (stopped) {
-        result.dispatcher.close()
+        result.unregister()
         void result.poller.stop()
         return
       }
       started = result
-      // Provided only now: Cordis starts dependants as soon as a name is provided, with or without a value.
-      revoke = ctx.provide('zalo', result.service)
     }, (error, delayMs) => {
       log.error(`dsh-zalo: failed to start: ${error instanceof Error ? error.stack ?? error.message : String(error)}; retrying in ${delayMs}ms`)
     }, STARTUP_BACKOFF)
@@ -142,13 +106,10 @@ export function apply(ctx: Context, config: Config): void {
       stopped = true
       cancel()
       if (started === undefined) return
-      const { poller, dispatcher } = started
+      const { poller, unregister } = started
       started = undefined
-      // Dependants stop first, while the bot can still serve their last calls.
-      revoke?.()
-      revoke = undefined
       // Queued messages must not start turns on a bot that is going away.
-      dispatcher.close()
+      unregister()
       return poller.stop()
     }
   }, 'dsh-zalo: bot runner')

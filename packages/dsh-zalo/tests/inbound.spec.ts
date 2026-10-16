@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { bodyText, hasTrigger, logEntryFor, parseInbound, stripTrigger } from '../src/inbound.ts'
+import { bodyText, hasTrigger, logEntryFor, parseInbound, stripTrigger, toInbound } from '../src/inbound.ts'
 import type { ZaloUpdate } from '../src/zalo-api.ts'
 import { FakeZaloApi } from './helpers/fake-api.ts'
 
@@ -93,5 +93,32 @@ describe('parseInbound', () => {
   it('turns a sticker into a marker the agent can read', async () => {
     const parsed = await parseInbound(upd('sticker', { sticker: 's1' }), { ...trig, api, inboxDir: dir, log })
     expect(parsed.text).toBe('[sticker]')
+  })
+})
+
+describe('toInbound', () => {
+  const deps = () => ({ ...trig, displayName: 'Dsh Bot', api, botId: 'bot1', inboxFor: () => join(dir, 'inbox'), log })
+
+  it('drops bots and the bot itself', () => {
+    expect(toInbound(upd('text', { text: 'hi', from: { id: 'bot1' } }), deps())).toBeUndefined()
+    expect(toInbound(upd('text', { text: 'hi', from: { id: 'x', is_bot: true } }), deps())).toBeUndefined()
+  })
+
+  it('keys the chat and keeps the sender channel-neutral', () => {
+    expect(toInbound(upd('text', { text: 'hi' }), deps())).toMatchObject({
+      chatKey: 'zalo:c1', messageId: 'mid1', sender: { id: 'u1', name: 'Ann' }, isGroup: false, addressed: true, at: Date.UTC(2026, 9, 15, 5),
+    })
+  })
+
+  it('addresses a group message by mention or prefix and strips the trigger', () => {
+    expect(toInbound(upd('text', { text: 'hi' }, 'GROUP'), deps())!.addressed).toBe(false)
+    expect(toInbound(upd('text', { text: '@Dsh Bot /reset' }, 'GROUP'), deps())).toMatchObject({ addressed: true, text: '/reset' })
+    expect(toInbound(upd('text', { text: '/ask what' }, 'GROUP'), deps())).toMatchObject({ addressed: true, text: 'what' })
+  })
+
+  it('loads only the log line in log mode and the turn text in turn mode', async () => {
+    const m = toInbound(upd('text', { text: 'hi' }, 'GROUP'), deps())!
+    expect(await m.load('log')).toMatchObject({ logEntry: { message_id: 'mid1', text: 'hi' }, text: '', images: [] })
+    expect((await m.load('turn')).text).toBe('hi')
   })
 })

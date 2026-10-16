@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { ChatLogEntry } from 'dsh-chat'
-import { pathSafe } from 'dsh-chat'
+import type { ChatLogEntry, InboundMessage as ChatInbound } from 'dsh-chat'
+import { chatKey, pathSafe } from 'dsh-chat'
 import { extensionFor, sniffImageType, type ImageMediaType } from './media.ts'
 import { isGroupChat, type ZaloApi, type ZaloMessage, type ZaloUpdate, type ZaloUser } from './zalo-api.ts'
 
@@ -111,5 +111,35 @@ export async function parseInbound(
     text,
     images: photo === undefined ? [] : [photo.image],
     logEntry,
+  }
+}
+
+export type ToInboundDeps = TriggerOptions & {
+  api: ZaloApi
+  botId: string
+  inboxFor(chatId: string): string
+  log: { warn(msg: string): void }
+}
+
+/** Normalizes one Zalo update for the chat core; undefined for bots and the bot itself. */
+export function toInbound(update: ZaloUpdate, deps: ToInboundDeps): ChatInbound | undefined {
+  const { message } = update
+  const sender = message.from
+  if (sender === undefined || sender.is_bot === true || sender.id === deps.botId) return undefined
+  const isGroup = isGroupChat(message.chat)
+  const body = bodyText(message)
+  return {
+    chatKey: chatKey('zalo', message.chat.id),
+    messageId: message.message_id,
+    sender: { id: sender.id, name: sender.display_name ?? '' },
+    isGroup,
+    addressed: !isGroup || hasTrigger(body, deps),
+    text: stripTrigger(body, deps),
+    at: message.date,
+    async load(mode) {
+      if (mode === 'log') return { logEntry: logEntryFor(update), text: '', images: [] }
+      const parsed = await parseInbound(update, { ...deps, inboxDir: deps.inboxFor(message.chat.id) })
+      return { logEntry: parsed.logEntry, text: parsed.text, images: parsed.images }
+    },
   }
 }
