@@ -263,7 +263,7 @@ as `[sticker 👍]`, so the next decision sees that the bot already answered.
 ### Schedule
 
 - `dsh-chat/schedule` stores reminders in `<channel>/schedule.json` with
-  `chatId: string` and `creator.id` as a `userKey`.
+  `chatKey`, `isGroup` and `creator.id` as a `userKey`.
 - Step 2 already shipped its marker, so no new migration: the store normalizes
   on load (a numeric `chatId` becomes its string, a numeric `creator.id` in
   `telegram/schedule.json` becomes `telegram:<id>`) and writes the new form on
