@@ -152,12 +152,13 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     }
     const detail = action.kind === 'react' ? { emoji: action.emoji } : { text: action.text }
     const at = now()
-    const day = dayKey(at, config.timezone)
-    state.count = state.day === day ? state.count + 1 : 1
-    state.day = day
     try {
       const channel = deps.chat.channel(deps.channel)
       if (channel === undefined) throw new Error(`channel ${deps.channel} offline`)
+      // Counted once the channel is there to carry it, as a failed call still counts like before.
+      const day = dayKey(at, config.timezone)
+      state.count = state.day === day ? state.count + 1 : 1
+      state.day = day
       if (action.kind === 'react') state.reacted = [...state.reacted, action.messageId].slice(-MAX_REACTED)
       const delivered = action.kind === 'react'
         ? await channel.react(chatId, action.messageId, action.emoji)

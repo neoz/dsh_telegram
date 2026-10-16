@@ -167,6 +167,23 @@ describe('startIdle', () => {
     expect(telegram.sent).toEqual([])
   })
 
+  it('does not spend the daily cap on an engagement the offline channel never carried', async () => {
+    let t = NOW
+    const idle = start(undefined, { config: { ...base, maxPerDay: 1, maxPerBurst: 2, slotGapMinutes: 1 }, now: () => t })
+    await idle.ready
+    for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) await say(idle, human(i + 1, m))
+    online = false
+    await runQueued()
+    online = true
+    t = NOW + 2 * MIN
+    for (const [i, m] of [-1.1, -1.3, -1.5, -1.7, -1.9].entries()) await say(idle, human(i + 6, m))
+    await runQueued()
+    idle.stop()
+    expect(checks().filter(verdict => verdict === 'go')).toHaveLength(2)
+    expect(checks()).not.toContain('daily_cap')
+    expect(telegram.sent).toHaveLength(1)
+  })
+
   it('records the start once the windows are seeded, with the burst settings and without the persona', async () => {
     const idle = start()
     expect(events).toEqual([])
