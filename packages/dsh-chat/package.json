@@ -63,6 +63,7 @@
     "./sessions": { "types": "./lib/sessions/index.d.ts", "default": "./lib/sessions/index.js" },
     "./history": { "types": "./lib/history/index.d.ts", "default": "./lib/history/index.js" },
     "./retention": { "types": "./lib/retention/index.d.ts", "default": "./lib/retention/index.js" },
+    "./idle": { "types": "./lib/idle/index.d.ts", "default": "./lib/idle/index.js" },
     "./package.json": "./package.json"
   }
 }
