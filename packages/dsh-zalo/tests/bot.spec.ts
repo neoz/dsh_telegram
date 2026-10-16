@@ -3,9 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { commandOf, createDispatcher, gate, handleMessage, isAllowed, type BotDeps } from '../src/bot.ts'
-import { ChatLog } from '../src/chatlog.ts'
+import { ChatLog, MemoryStore } from 'dsh-chat'
 import { Config } from '../src/config.ts'
-import { MemoryStore } from '../src/memory.ts'
 import { SeenIds } from '../src/poller.ts'
 import type { ZaloUpdate } from '../src/zalo-api.ts'
 import { FakeZaloApi } from './helpers/fake-api.ts'
@@ -84,12 +83,12 @@ describe('handleMessage', () => {
     agents = {
       resolve: vi.fn(async () => ({ agent, resumed: false })),
       reset: vi.fn(async () => {}), stop: vi.fn(() => false), markTurn: vi.fn(async () => {}),
-      lastTurnAt: vi.fn(() => ''), workspaceFor: vi.fn(() => join(dir, 'ws')),
+      lastTurnMessageId: vi.fn(() => ''), workspaceFor: vi.fn(() => join(dir, 'ws')),
       setTurn: vi.fn(), memoryInjected: vi.fn(() => true), markMemoryInjected: vi.fn(async () => {}),
     }
     deps = {
       api,
-      config: Config({ botToken: 't', allowFrom: ['ann'], workspaceRoot: join(dir, 'ws'), dataDir: dir, model: 'm', superAdmins: ['ann'], typingIntervalMs: 60_000 }),
+      config: Config({ botToken: 't', allowFrom: ['ann'], superAdmins: ['ann'], typingIntervalMs: 60_000 }),
       chatLog: new ChatLog(join(dir, 'log')),
       memory: new MemoryStore(join(dir, 'memory'), { maxEntries: 50, maxGlobalEntries: 50, maxEntryChars: 200 }),
       agents: agents as never,
@@ -103,9 +102,15 @@ describe('handleMessage', () => {
   it('answers a private message and logs both sides', async () => {
     await handleMessage(upd('hi'), deps)
     expect(api.callsTo('sendMessage')[0]!.args.slice(0, 2)).toEqual(['p1', 'answer'])
-    const log = await deps.chatLog.readAll('p1')
+    const log = await deps.chatLog.readAll('zalo:p1')
     expect(log.map(e => [e.text, e.handled ?? e.bot])).toEqual([['hi', true], ['answer', true]])
-    expect(agents.markTurn).toHaveBeenCalledWith('p1', log[0]!.ts)
+    expect(agents.markTurn).toHaveBeenCalledWith('zalo:p1', log[0]!.message_id)
+  })
+
+  it('keys the chat as zalo:<id> and records a channel-neutral turn', async () => {
+    await handleMessage(upd('hi'), deps)
+    expect(agents.resolve).toHaveBeenCalledWith('zalo:p1')
+    expect(agents.setTurn).toHaveBeenCalledWith('zalo:p1', { sender: { id: 'ann', name: 'Ann' }, isGroup: false, isSuperAdmin: true })
   })
 
   it('logs the id of an unknown private sender so it can be added to allowFrom', async () => {
@@ -133,16 +138,16 @@ describe('handleMessage', () => {
     dispatcher.enqueue('p1', () => new Promise<void>((r) => { release = r }))
     dispatcher.dispatch(upd('/reset'))
     await vi.waitFor(() => expect(release).toBeDefined())
-    expect(agents.stop).toHaveBeenCalledWith('p1')
+    expect(agents.stop).toHaveBeenCalledWith('zalo:p1')
     expect(agents.reset).not.toHaveBeenCalled()
     release!()
-    await vi.waitFor(() => expect(agents.reset).toHaveBeenCalledWith('p1'))
+    await vi.waitFor(() => expect(agents.reset).toHaveBeenCalledWith('zalo:p1'))
   })
 
   it('logs an untriggered group message without a turn', async () => {
     await handleMessage(upd('chatter', 'GROUP'), deps)
     expect(api.callsTo('sendMessage')).toEqual([])
-    expect((await deps.chatLog.readAll('g1')).map(e => e.text)).toEqual(['chatter'])
+    expect((await deps.chatLog.readAll('zalo:g1')).map(e => e.text)).toEqual(['chatter'])
   })
 
   it('gives a triggered group turn the messages since the last turn', async () => {
@@ -154,7 +159,7 @@ describe('handleMessage', () => {
 
   it('runs commands for super admins only', async () => {
     await handleMessage(upd('/reset'), deps)
-    expect(agents.reset).toHaveBeenCalledWith('p1')
+    expect(agents.reset).toHaveBeenCalledWith('zalo:p1')
     expect(api.callsTo('sendMessage')[0]!.args[1]).toBe('Started a new conversation.')
     deps = { ...deps, config: Config({ ...deps.config, superAdmins: [] }) }
     await handleMessage(upd('/reset'), deps)

@@ -1,12 +1,10 @@
 import { join } from 'node:path'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
+import { chatKey, oneLine, renderMemoryBlock, senderLabel, type ChatAgents, type ChatLog, type ChatLogEntry, type MemoryStore } from 'dsh-chat'
 import type { Config } from './config.ts'
 import { bodyText, hasTrigger, logEntryFor, parseInbound, stripTrigger, type TriggerOptions } from './inbound.ts'
 import type { ImageMediaType } from './media.ts'
-import { renderMemoryBlock, type MemoryStore } from './memory.ts'
 import type { SeenIds } from './poller.ts'
-import type { ChatAgents } from './sessions.ts'
 import { runTurn } from './turn.ts'
 import { isGroupChat, type ZaloApi, type ZaloUpdate, type ZaloUser } from './zalo-api.ts'
 
@@ -83,7 +81,7 @@ function recentBlock(entries: ChatLogEntry[]): string {
 /** Chat plus global memory for the first turn of a session; undefined when reading failed, so the session stays unmarked. */
 async function memoryBlock(deps: BotDeps, chatId: string): Promise<string | undefined> {
   try {
-    const [chat, global] = await Promise.all([deps.memory.list({ kind: 'chat', chatId }), deps.memory.list({ kind: 'global' })])
+    const [chat, global] = await Promise.all([deps.memory.list({ kind: 'chat', key: chatKey('zalo', chatId) }), deps.memory.list({ kind: 'global' })])
     return renderMemoryBlock(chat, global)
   } catch (error) {
     deps.log.warn(`dsh-zalo: reading memory for chat ${chatId} failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -95,11 +93,11 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
 
 async function runCommand(command: Command, chatId: string, deps: BotDeps): Promise<void> {
   if (command === 'reset') {
-    await deps.agents.reset(chatId)
+    await deps.agents.reset(chatKey('zalo', chatId))
     await deps.api.sendMessage(chatId, 'Started a new conversation.')
   } else if (command === 'stop') {
     // A cancelled turn reports "Stopped." on its own; only an idle agent needs a reply here.
-    if (!deps.agents.stop(chatId)) await deps.api.sendMessage(chatId, 'Nothing is running.')
+    if (!deps.agents.stop(chatKey('zalo', chatId))) await deps.api.sendMessage(chatId, 'Nothing is running.')
   } else {
     await deps.api.sendMessage(chatId, HELP_TEXT)
   }
@@ -116,8 +114,9 @@ export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<
     return
   }
   const chatId = update.message.chat.id
+  const key = chatKey('zalo', chatId)
   if (verdict === 'log-only') {
-    await deps.chatLog.append(chatId, logEntryFor(update))
+    await deps.chatLog.append(key, logEntryFor(update))
     return
   }
   const command = commandFrom(update, deps)
@@ -130,27 +129,31 @@ export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<
   const receivedAt = Date.now()
   const lagMs = Math.max(0, receivedAt - update.message.date)
   const inbound = await parseInbound(update, {
-    api: deps.api, inboxDir: join(deps.agents.workspaceFor(chatId), 'inbox'), log: deps.log,
+    api: deps.api, inboxDir: join(deps.agents.workspaceFor(key), 'inbox'), log: deps.log,
     ...triggerOf(deps),
   })
-  await deps.chatLog.append(chatId, { ...inbound.logEntry, handled: true })
+  await deps.chatLog.append(key, { ...inbound.logEntry, handled: true })
 
-  const resolved = await deps.agents.resolve(chatId)
+  const resolved = await deps.agents.resolve(key)
   if (resolved.resumeFailed !== undefined) {
     await deps.api.sendMessage(chatId, 'The previous conversation could not be restored; starting a new one.')
   }
-  deps.agents.setTurn(chatId, { sender: inbound.sender, isGroup: inbound.isGroup })
+  deps.agents.setTurn(key, {
+    sender: { id: inbound.sender.id, name: inbound.sender.display_name ?? '' },
+    isGroup: inbound.isGroup,
+    isSuperAdmin: deps.config.superAdmins.includes(inbound.sender.id),
+  })
 
   let text = inbound.text
   if (inbound.isGroup) {
-    const recent = await deps.chatLog.recent(chatId, deps.agents.lastTurnAt(chatId), inbound.messageId, deps.config.recentMessagesLimit)
+    const recent = await deps.chatLog.recent(key, deps.agents.lastTurnMessageId(key), inbound.messageId, deps.config.recentMessagesLimit)
     if (recent.length > 0) text = `${recentBlock(recent)}\n\n${text}`
   }
   // The memory block goes in front of the first user message of a session; later turns rely on memory_recall.
   const sessionId = String(resolved.agent.id)
-  const memoryText = deps.agents.memoryInjected(chatId, sessionId) ? '' : await memoryBlock(deps, chatId)
+  const memoryText = deps.agents.memoryInjected(key, sessionId) ? '' : await memoryBlock(deps, chatId)
   if (memoryText !== undefined && memoryText !== '') text = `${memoryText}\n\n${text}`
-  await deps.agents.markTurn(chatId, inbound.logEntry.ts)
+  await deps.agents.markTurn(key, inbound.messageId)
 
   const content: ContentBlock[] = [{ type: 'text', text }]
   if (inbound.images.length > 0) {
@@ -158,7 +161,7 @@ export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<
     for (const ref of refs) content.push({ type: 'image', attachment: ref as never })
   }
   const prepMs = Date.now() - receivedAt
-  if (memoryText !== undefined) await deps.agents.markMemoryInjected(chatId, sessionId)
+  if (memoryText !== undefined) await deps.agents.markMemoryInjected(key, sessionId)
 
   const result = await runTurn({
     api: deps.api,
@@ -171,7 +174,7 @@ export async function handleMessage(update: ZaloUpdate, deps: BotDeps): Promise<
     log: deps.log,
   })
   if (result.text !== '') {
-    await deps.chatLog.append(chatId, {
+    await deps.chatLog.append(key, {
       ts: new Date().toISOString(),
       message_id: result.sentMessageId ?? '',
       user_id: deps.bot.id,
@@ -227,7 +230,7 @@ export function createDispatcher(deps: BotDeps): Dispatcher {
         void handleMessage(update, deps).catch(report(update))
         return
       }
-      if (command === 'reset') deps.agents.stop(update.message.chat.id)
+      if (command === 'reset') deps.agents.stop(chatKey('zalo', update.message.chat.id))
       enqueue(update.message.chat.id, () => handleMessage(update, deps).catch(report(update)))
     },
     enqueue,

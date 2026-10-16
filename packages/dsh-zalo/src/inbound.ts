@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { ChatLogEntry } from './chatlog.ts'
-import { extensionFor, pathSafe, sniffImageType, type ImageMediaType } from './media.ts'
+import type { ChatLogEntry } from 'dsh-chat'
+import { pathSafe } from 'dsh-chat'
+import { extensionFor, sniffImageType, type ImageMediaType } from './media.ts'
 import { isGroupChat, type ZaloApi, type ZaloMessage, type ZaloUpdate, type ZaloUser } from './zalo-api.ts'
 
 export interface InboundImage { data: Buffer; mediaType: ImageMediaType }

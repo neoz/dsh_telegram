@@ -4,16 +4,15 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-tools'
+import { idIn } from 'dsh-chat'
+import type {} from 'dsh-chat/log'
+import type {} from 'dsh-chat/memory'
+import type {} from 'dsh-chat/migrate'
+import type {} from 'dsh-chat/sessions'
 import { createDispatcher, type Dispatcher } from './bot.ts'
-import { ChatLog, type ChatLogEntry } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
-import { MemoryStore } from './memory.ts'
 import { SeenIds, startPolling, type Poller } from './poller.ts'
-import { sweepOldFiles } from './retention.ts'
 import type { ZaloService } from './service.ts'
-import { SessionMap } from './session-map.ts'
-import { ChatAgents } from './sessions.ts'
-import { registerChatTools } from './tools.ts'
 import { createZaloApi } from './zalo-api.ts'
 
 export { Config } from './config.ts'
@@ -22,10 +21,10 @@ export type { ZaloService } from './service.ts'
 
 /** Cordis plugin name. */
 export const name = 'dsh-zalo'
-/** Services required before the bot starts. */
-export const inject = ['agents', 'tools', 'attachments', 'loader']
+/** Services required before the bot starts; the stores come from the dsh-chat plugins. */
+export const inject = ['attachments', 'loader', 'chatData', 'chatLog', 'chatMemory', 'chatAgents']
 
-interface Started { poller: Poller; dispatcher: Dispatcher; agents: ChatAgents; service: ZaloService }
+interface Started { poller: Poller; dispatcher: Dispatcher; service: ZaloService }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -45,31 +44,14 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   const api = createZaloApi(config.botToken, config.retry, fetch, config.maxDownloadMb * 1024 * 1024)
   const me = await api.getMe()
 
-  const chatLog = new ChatLog(join(config.dataDir, 'chatlog'), forwardAppends((chatId, entry) => ctx.emit('zalo/message', chatId, entry), log.warn), config.chatLogMaxEntries)
-  const memory = new MemoryStore(join(config.dataDir, 'memory'), config.memory)
-  const map = new SessionMap(join(config.dataDir, 'zalo-sessions.json'))
-  await map.load()
-
-  const agents: ChatAgents = new ChatAgents({
-    agents: ctx.agents,
-    map,
-    workspaceRoot: config.workspaceRoot,
-    selection: {
-      provider: config.provider,
-      model: config.model,
-      ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }),
-    },
-    setup: (agentCtx, _agent, chatId) => {
-      registerChatTools(agentCtx, { chatLog, chatId, memory, superAdmins: config.superAdmins, currentTurn: () => agents.turnOf(chatId) })
-    },
-    log,
-  })
+  const chatLog = ctx.chatLog
+  const agents = ctx.chatAgents
 
   const dispatcher = createDispatcher({
     api,
     config,
     chatLog,
-    memory,
+    memory: ctx.chatMemory,
     agents,
     attachments: ctx.attachments,
     bot: me,
@@ -88,26 +70,17 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   return {
     poller,
     dispatcher,
-    agents,
     service: {
       api,
       chatLog,
       queue: dispatcher,
       bot: me,
-      dataDir: config.dataDir,
-      chatOf: agentId => agents.chatOf(agentId),
+      dataDir: join(ctx.chatData.dataDir, 'zalo'),
+      chatOf: (agentId) => {
+        const key = agents.chatOf(agentId)
+        return key === undefined ? undefined : idIn('zalo', key)
+      },
     },
-  }
-}
-
-/** Chat-log listener that forwards lines as zalo/message; Cordis does not isolate listeners, so a throw only warns. */
-export function forwardAppends(emit: (chatId: string, entry: ChatLogEntry) => void, warn: (msg: string) => void): (chatId: string, entry: ChatLogEntry) => void {
-  return (chatId, entry) => {
-    try {
-      emit(chatId, entry)
-    } catch (error) {
-      warn(`dsh-zalo: a zalo/message listener failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
   }
 }
 
@@ -141,26 +114,14 @@ export function retryStart<T>(
 
 const STARTUP_BACKOFF = { startDelayMs: 5_000, maxDelayMs: 300_000 }
 
-const DAY_MS = 86_400_000
-
-/** Sweeps old inbox and outbox files now and then once a day; returns the timer to clear on stop. */
-function startRetention(config: Config, log: ReturnType<typeof loggerFor>): NodeJS.Timeout {
-  const sweep = () => {
-    sweepOldFiles(config.workspaceRoot, config.fileRetentionDays * DAY_MS).catch((error: unknown) => {
-      log.warn(`dsh-zalo: file retention sweep failed: ${error instanceof Error ? error.message : String(error)}`)
-    })
-  }
-  sweep()
-  return setInterval(sweep, DAY_MS).unref()
-}
-
 export function apply(ctx: Context, config: Config): void {
   assertConfig(config)
   const log = loggerFor(ctx)
-  ctx.effect(() => {
-    const timer = startRetention(config, log)
-    return () => clearInterval(timer)
-  }, 'dsh-zalo: file retention')
+  // Extension plugins listen to zalo/message until they move to dsh-chat.
+  ctx.on('chat/message', (key, entry) => {
+    const id = idIn('zalo', key)
+    if (id !== undefined) ctx.emit('zalo/message', id, entry)
+  })
   let started: Started | undefined
   let revoke: (() => void) | undefined
   let stopped = false
@@ -168,7 +129,7 @@ export function apply(ctx: Context, config: Config): void {
     const cancel = retryStart(() => start(ctx, config), (result) => {
       if (stopped) {
         result.dispatcher.close()
-        void result.poller.stop().then(() => result.agents.disposeAll())
+        void result.poller.stop()
         return
       }
       started = result
@@ -181,14 +142,14 @@ export function apply(ctx: Context, config: Config): void {
       stopped = true
       cancel()
       if (started === undefined) return
-      const { poller, dispatcher, agents } = started
+      const { poller, dispatcher } = started
       started = undefined
       // Dependants stop first, while the bot can still serve their last calls.
       revoke?.()
       revoke = undefined
-      // Queued messages would resolve agents that disposeAll is about to drop.
+      // Queued messages must not start turns on a bot that is going away.
       dispatcher.close()
-      void poller.stop().then(() => agents.disposeAll())
+      void poller.stop()
     }
   }, 'dsh-zalo: bot runner')
 }

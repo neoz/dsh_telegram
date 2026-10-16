@@ -1,16 +1,5 @@
-import { createHash } from 'node:crypto'
-
 /** Image types `dsh-attachment` accepts. */
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
-
-/**
- * An id made safe as one path segment. A safe id is kept as is; otherwise anything but letters, digits,
- * `_` and `-` becomes `_` and a short hash of the original keeps ids that sanitise alike apart.
- */
-export function pathSafe(id: string): string {
-  if (/^[A-Za-z0-9_-]+$/.test(id)) return id
-  return `${id.replace(/[^A-Za-z0-9_-]/g, '_')}-${createHash('sha256').update(id).digest('hex').slice(0, 8)}`
-}
 
 /** Media type from the file signature; undefined when the bytes are not a supported image. */
 export function sniffImageType(data: Buffer): ImageMediaType | undefined {

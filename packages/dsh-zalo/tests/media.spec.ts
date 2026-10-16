@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { extensionFor, pathSafe, sniffImageType } from '../src/media.ts'
+import { pathSafe } from 'dsh-chat'
+import { extensionFor, sniffImageType } from '../src/media.ts'
 
 describe('pathSafe', () => {
   it('keeps plain Zalo ids', () => {

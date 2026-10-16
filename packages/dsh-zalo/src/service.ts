@@ -1,5 +1,5 @@
 import type { Dispatcher } from './bot.ts'
-import type { ChatLog, ChatLogEntry } from './chatlog.ts'
+import type { ChatLog, ChatLogEntry } from 'dsh-chat'
 import type { ZaloApi } from './zalo-api.ts'
 
 /** The running bot, for extension plugins; provided only while the bot polls. */
