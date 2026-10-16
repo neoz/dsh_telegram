@@ -48,6 +48,12 @@
     - id: chat-history
       name: dsh-chat/history
 
+    - id: chat
+      name: dsh-chat
+      config:
+        allowFrom: !!js (process.env.TELEGRAM_ALLOW_FROM ?? '').split(',').map(s => s.trim().replace(/^@/, '')).filter(Boolean).map(s => 'telegram:' + s.replace(/^(?!\d+$)/, '@').toLowerCase())
+        superAdmins: !!js (process.env.TELEGRAM_SUPER_ADMINS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0).map(n => 'telegram:' + n)
+
     - id: chat-retention
       name: dsh-chat/retention
 
@@ -55,8 +61,6 @@
       name: dsh-telegram
       config:
         botToken: !!js process.env.TELEGRAM_BOT_TOKEN
-        allowFrom: !!js (process.env.TELEGRAM_ALLOW_FROM ?? '').split(',').map(s => s.trim()).filter(Boolean)
-        superAdmins: !!js (process.env.TELEGRAM_SUPER_ADMINS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0)
 
     # Telegram sends no browser zone, so the clock always formats in this fallback zone.
     - id: time-context

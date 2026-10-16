@@ -34,8 +34,6 @@
 - id: telegram
   config:
     botToken: !!js process.env.TELEGRAM_BOT_TOKEN
-    allowFrom: !!js (process.env.TELEGRAM_ALLOW_FROM ?? '').split(',').map(s => s.trim()).filter(Boolean)
-    superAdmins: !!js (process.env.TELEGRAM_SUPER_ADMINS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0)
     status:
       thinking: Đang suy nghĩ...
       web: Đang tìm trên web...

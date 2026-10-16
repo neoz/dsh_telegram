@@ -115,3 +115,24 @@ describe('dsh-chat rows', () => {
     expect(bundles.indexOf('dsh-chat')).toBeLessThan(bundles.indexOf('dsh-telegram'))
   })
 })
+
+describe('chat router row', () => {
+  it('maps Telegram ids and usernames to user keys', async () => {
+    const config = row(await rows('../cordis.patch.yml'), 'chat').config!
+    expect(evalJs(config.allowFrom, { TELEGRAM_ALLOW_FROM: '123, @Ann ,bob,' })).toEqual(['telegram:123', 'telegram:@ann', 'telegram:@bob'])
+    expect(evalJs(config.superAdmins, { TELEGRAM_SUPER_ADMINS: '7, x, -3' })).toEqual(['telegram:7'])
+    expect(evalJs(config.allowFrom, {})).toEqual([])
+  })
+
+  it('mounts the router before the bot and keeps the allowlist off the telegram row', async () => {
+    const bundle = await rows('../cordis.patch.yml')
+    const ids = bundle.flatMap(r => r.insert ?? []).map(r => r.id)
+    expect(ids.indexOf('chat')).toBeLessThan(ids.indexOf('telegram'))
+    expect(row(bundle, 'chat').name).toBe('dsh-chat')
+    for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
+      const telegram = row(await rows(path), 'telegram').config!
+      expect(telegram).not.toHaveProperty('allowFrom')
+      expect(telegram).not.toHaveProperty('superAdmins')
+    }
+  })
+})

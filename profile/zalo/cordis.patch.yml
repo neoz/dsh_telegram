@@ -33,5 +33,3 @@
 - id: zalo
   config:
     botToken: !!js process.env.ZALO_BOT_TOKEN
-    allowFrom: !!js (process.env.ZALO_ALLOW_FROM ?? '').split(',').map(s => s.trim()).filter(Boolean)
-    superAdmins: !!js (process.env.ZALO_SUPER_ADMINS ?? '').split(',').map(s => s.trim()).filter(Boolean)

@@ -20,11 +20,21 @@ const PATHS = ['../../../profile/zalo/cordis.patch.yml', '../cordis.patch.yml']
 const env = { ZALO_BOT_TOKEN: 't', ZALO_ALLOW_FROM: 'a1, b2,', ZALO_SUPER_ADMINS: 'a1' }
 
 describe('profile patch', () => {
-  it('maps env vars to a valid zalo row with string ids', async () => {
+  it('maps env vars to a valid zalo row that leaves the allowlist to the router', async () => {
     for (const path of PATHS) {
-      const config = Config(resolve(row(await rows(path), 'zalo').config, env))
-      expect(config).toMatchObject({ botToken: 't', allowFrom: ['a1', 'b2'], superAdmins: ['a1'] })
+      const raw = row(await rows(path), 'zalo').config!
+      expect(raw).not.toHaveProperty('allowFrom')
+      expect(raw).not.toHaveProperty('superAdmins')
+      expect(Config(resolve(raw, env))).toMatchObject({ botToken: 't' })
     }
+  })
+  it('maps Zalo ids to user keys on the chat router row, mounted before the bot', async () => {
+    const bundle = await rows('../cordis.patch.yml')
+    const chat = row(bundle, 'chat')
+    expect(chat.name).toBe('dsh-chat')
+    expect(resolve(chat.config, env)).toEqual({ allowFrom: ['zalo:a1', 'zalo:b2'], superAdmins: ['zalo:a1'] })
+    const ids = bundle.flatMap(r => r.insert ?? []).map(r => r.id)
+    expect(ids.indexOf('chat')).toBeLessThan(ids.indexOf('zalo'))
   })
   it('mounts the plugin, its logger and a local clock', async () => {
     const bundle = await rows('../cordis.patch.yml')
