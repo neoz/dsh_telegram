@@ -1,7 +1,7 @@
 # dsh-chat: channel-agnostic chat core as Cordis plugins
 
 Date: 2026-10-16
-Status: approved design, pending implementation plan
+Status: approved design; steps 1, 2 and 5 implemented; Amendment 1 approved
 
 ## Goal
 
@@ -203,3 +203,101 @@ Each step leaves the repository green and deployable.
   non-bot entry with that id (all entries when it is absent or trimmed away).
 - Until the router exists (rollout step 3), each adapter keeps its own config
   for `superAdmins` and computes `TurnContext.isSuperAdmin` itself.
+
+## Amendment 1: channel intents and idle on Zalo (2026-10-16)
+
+Approved after rollout steps 1, 2 and 5 shipped. It replaces the parts of
+"Channel interface" it names and details rollout steps 3 and 4.
+
+### Intents, not capabilities
+
+The core states what it wants; each channel decides how to do it on its
+platform. `caps` is removed: chunking and rendering already belong to the
+adapter, and file sending is an `agentTools` matter.
+
+```ts
+interface ChatChannel {
+  readonly id: string
+  readonly bot: { id: string; name: string }
+  openTurn(chatId: string, origin: { replyTo?: string }): TurnSink
+  /** Sends a message outside any turn (schedule, idle, errors). */
+  send(chatId: string, text: string, opts?: { replyTo?: string }): Promise<Delivered>
+  /** Reacts to one message the way this platform can. */
+  react(chatId: string, messageId: string, emoji: string): Promise<Delivered>
+  agentTools?(chatId: string, turn: () => TurnContext | undefined): ToolDefinition[]
+  stop(): Promise<void>
+}
+
+/** What reached the chat. `messageId` and `text` are set when a new message was posted. */
+interface Delivered {
+  as: 'native' | 'fallback'
+  messageId?: string
+  text?: string
+}
+```
+
+| Intent | Telegram | Zalo |
+|---|---|---|
+| `send` with `replyTo` | reply quoting the message, `native` | plain message, `fallback` |
+| `react` | `setReaction`, `native`, no `messageId` | `sendSticker` with `stickers[emoji]`, posted as `[sticker <emoji>]`; an emoji without a sticker is sent as text; both `fallback` |
+
+### Logging what was posted
+
+Whoever calls `send` or `react` appends a bot line to the chat log when
+`Delivered.messageId` is set, with `Delivered.text` as the text. A Telegram
+reaction posts nothing and is not logged, as today; a Zalo sticker is logged
+as `[sticker 👍]`, so the next decision sees that the bot already answered.
+
+### Idle
+
+- `dsh-chat/idle` keeps one decision prompt for every channel, byte-identical
+  to the current Telegram prompt (same allowed emoji, same reply format).
+- Config `chatIds: number[]` becomes `chatKeys: string[]`. The Telegram patch
+  maps `TELEGRAM_IDLE_CHATS` to `telegram:<id>`; the Zalo patch reads
+  `ZALO_IDLE_ENABLED` and `ZALO_IDLE_CHATS` into `zalo:<id>`.
+- One idle plugin serves every registered channel; decisions are logged to
+  `<channel>/idle-decisions.jsonl` and decision events gain `as`.
+- Work for a channel that is not registered is skipped with a
+  `channel offline` warning.
+
+### Schedule
+
+- `dsh-chat/schedule` stores reminders in `<channel>/schedule.json` with
+  `chatId: string` and `creator.id` as a `userKey`.
+- Step 2 already shipped its marker, so no new migration: the store normalizes
+  on load (a numeric `chatId` becomes its string, a numeric `creator.id` in
+  `telegram/schedule.json` becomes `telegram:<id>`) and writes the new form on
+  the next save.
+- Delivery uses `ctx.chat.channel(id).send` and `ctx.chat.prompt(chatKey, ...)`;
+  super-admin checks use the router's `superAdmins` (userKeys).
+
+### Zalo stickers
+
+`dsh-zalo` config gains `stickers: Record<emoji, stickerId>` (default `{}`).
+The Zalo patch ships this map, from the pack "Khu Vườn Trên Mây 1"
+(`https://stickers.zaloapp.com/oa/detail?cid=c65678bc44f9ada7f4e8`):
+
+| Emoji | Sticker id |
+|---|---|
+| 👍 | `e4f2231c1f59f607af48` |
+| ❤ | `ec2022ce1e8bf7d5ae9a` |
+| 😁 | `071adff4e3b10aef53a0` |
+| 🤣 | `f80822e61ea3f7fdaeb2` |
+| 🤔 | `b6e67d08414da813f15c` |
+| 🙈 | `1c97c779fb3c12624b2d` |
+| 😎 | `181fd9f1e5b40cea55a5` |
+| 🤩 | `d33017de2b9bc2c59b8a` |
+| 🤗 | `94c3402d7c689536cc79` |
+
+🔥 👀 🎉 👏 💯 🫡 have no sticker and fall back to text. Emoji keys are
+compared without the U+FE0F variation selector, as idle already normalizes.
+
+### Plans
+
+- Plan A (rollout step 3): `chat` router with `ChatChannel` as above,
+  shared gate, queue and turn; both adapters reduced to transport and
+  rendering; `TelegramService` and the Zalo service removed except what
+  `dsh-telegram/idle` and `dsh-telegram/schedule` still need until plan B.
+- Plan B (rollout step 4): `dsh-chat/idle` and `dsh-chat/schedule`, events
+  `chat/turn` and `chat/message`, Zalo `sendSticker` and the sticker map,
+  idle and schedule rows in the Zalo patch and compose env.
