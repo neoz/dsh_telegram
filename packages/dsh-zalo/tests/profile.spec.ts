@@ -37,6 +37,32 @@ describe('profile patch', () => {
     const ids = bundle.flatMap(r => r.insert ?? []).map(r => r.id)
     expect(ids.indexOf('chat')).toBeLessThan(ids.indexOf('zalo'))
   })
+  it('mounts shared idle and reminders for Zalo, idle off unless asked', async () => {
+    const bundle = await rows('../cordis.patch.yml')
+    expect(row(bundle, 'chat-idle').name).toBe('dsh-chat/idle')
+    expect(row(bundle, 'chat-schedule').name).toBe('dsh-chat/schedule')
+    expect(row(bundle, 'chat-schedule').config).toEqual({ timeZone: 'Asia/Ho_Chi_Minh', maxPerChat: 20 })
+    for (const path of PATHS) {
+      const idle = resolve(row(await rows(path), 'chat-idle').config, { ZALO_IDLE_ENABLED: 'true', ZALO_IDLE_CHATS: 'g1, g2,' })
+      expect(idle).toMatchObject({ enabled: true, chatKeys: ['zalo:g1', 'zalo:g2'], idleMinutes: 10, maxPerBurst: 4, maxPerDay: 24 })
+      expect(resolve(row(await rows(path), 'chat-idle').config, {})).toMatchObject({ enabled: false, chatKeys: [] })
+    }
+  })
+  it('gives idle the profile persona', async () => {
+    const profile = await rows('../../../profile/zalo/cordis.patch.yml')
+    const persona = profile.find(r => r.id === 'system-prompt')!.config!.personaPrefix
+    expect(typeof persona).toBe('string')
+    expect(row(profile, 'chat-idle').config!.persona).toBe(persona)
+  })
+  it('maps the reaction emoji to the Khu Vuon Tren May 1 stickers', async () => {
+    for (const path of PATHS) {
+      const config = Config(resolve(row(await rows(path), 'zalo').config, env))
+      expect(config.stickers['\u{1F44D}']).toBe('e4f2231c1f59f607af48')
+      expect(config.stickers['\u{2764}']).toBe('ec2022ce1e8bf7d5ae9a')
+      expect(config.stickers['\u{1F917}']).toBe('94c3402d7c689536cc79')
+      expect(Object.keys(config.stickers)).toHaveLength(9)
+    }
+  })
   it('mounts the plugin, its logger and a local clock', async () => {
     const bundle = await rows('../cordis.patch.yml')
     expect(row(bundle, 'zalo').name).toBe('dsh-zalo')

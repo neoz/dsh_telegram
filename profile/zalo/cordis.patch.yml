@@ -2,7 +2,8 @@
 # This deployment gives the assistant a Vietnamese-speaking, playful persona.
 - id: system-prompt
   config:
-    personaPrefix: >-
+    # Anchored so the chat-idle row's persona reuses it; the alias only resolves inside this file.
+    personaPrefix: &persona >-
       Bạn là một trợ lý AI chạy trên model {{model}}, nói chuyện qua Zalo.
       Tính cách: một cô em gái tinh nghịch, hay châm biếm nhẹ nhàng, thích trêu chọc
       người dùng bằng những câu đùa dí dỏm, nhưng luôn hoàn thành việc được nhờ
@@ -33,3 +34,27 @@
 - id: zalo
   config:
     botToken: !!js process.env.ZALO_BOT_TOKEN
+    # Reactions become stickers from the pack "Khu Vuon Tren May 1" (stickers.zaloapp.com, cid c65678bc44f9ada7f4e8).
+    stickers:
+      "\U0001F44D": e4f2231c1f59f607af48
+      "\u2764": ec2022ce1e8bf7d5ae9a
+      "\U0001F601": 071adff4e3b10aef53a0
+      "\U0001F923": f80822e61ea3f7fdaeb2
+      "\U0001F914": b6e67d08414da813f15c
+      "\U0001F648": 1c97c779fb3c12624b2d
+      "\U0001F60E": 181fd9f1e5b40cea55a5
+      "\U0001F929": d33017de2b9bc2c59b8a
+      "\U0001F917": 94c3402d7c689536cc79
+
+# Patches replace a row's config wholesale, so the bundle's chat-idle row is restated here with the persona.
+- id: chat-idle
+  config:
+    enabled: !!js process.env.ZALO_IDLE_ENABLED === 'true'
+    chatKeys: !!js (process.env.ZALO_IDLE_CHATS ?? '').split(',').map(s => s.trim()).filter(Boolean).map(s => 'zalo:' + s)
+    idleMinutes: 10
+    minNewMessages: 5
+    chance: 1
+    maxPerBurst: 4
+    slotGapMinutes: 10
+    maxPerDay: 24
+    persona: *persona

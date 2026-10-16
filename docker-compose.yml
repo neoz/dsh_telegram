@@ -35,6 +35,8 @@ services:
       ZALO_BOT_TOKEN: ${ZALO_BOT_TOKEN}
       ZALO_ALLOW_FROM: ${ZALO_ALLOW_FROM}
       ZALO_SUPER_ADMINS: ${ZALO_SUPER_ADMINS:-}
+      ZALO_IDLE_ENABLED: ${ZALO_IDLE_ENABLED:-false}
+      ZALO_IDLE_CHATS: ${ZALO_IDLE_CHATS:-}
       DSH_MODEL: ${DSH_MODEL:-deepseek-flash}
       DSH_LOG_LEVEL: ${DSH_LOG_LEVEL:-2}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
