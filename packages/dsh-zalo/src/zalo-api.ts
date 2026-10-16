@@ -49,6 +49,8 @@ export interface ZaloApi {
   /** Long-polls for updates; resolves `[]` when the poll times out empty. */
   getUpdates(timeoutSec: number, signal?: AbortSignal): Promise<ZaloUpdate[]>
   sendMessage(chatId: string, text: string, options?: { parseMode?: 'markdown' }): Promise<{ messageId: string }>
+  /** `sticker` is an id from stickers.zaloapp.com. */
+  sendSticker(chatId: string, sticker: string): Promise<{ messageId: string }>
   sendChatAction(chatId: string, action: 'typing'): Promise<void>
   downloadUrl(url: string): Promise<Buffer>
 }
@@ -151,6 +153,10 @@ export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: type
         text,
         ...(options.parseMode === undefined ? {} : { parse_mode: options.parseMode }),
       }, REQUEST_TIMEOUT_MS, undefined, false)
+      return { messageId: sent?.message_id ?? '' }
+    },
+    async sendSticker(chatId, sticker) {
+      const sent = await call<{ message_id: string }>('sendSticker', { chat_id: chatId, sticker }, REQUEST_TIMEOUT_MS, undefined, false)
       return { messageId: sent?.message_id ?? '' }
     },
     async sendChatAction(chatId, action) {

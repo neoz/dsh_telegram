@@ -36,6 +36,10 @@ export class FakeZaloApi implements ZaloApi {
     this.record('sendMessage', [chatId, text, options])
     return { messageId: `m${this.nextId++}` }
   }
+  async sendSticker(chatId: string, sticker: string) {
+    this.record('sendSticker', [chatId, sticker])
+    return { messageId: `m${this.nextId++}` }
+  }
   async sendChatAction(chatId: string, action: 'typing') {
     this.record('sendChatAction', [chatId, action])
   }

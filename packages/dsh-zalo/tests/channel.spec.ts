@@ -90,9 +90,17 @@ describe('Zalo send and react', () => {
     expect(api.callsTo('sendMessage').map(c => c.args)).toEqual([['c1', 'hi', undefined], ['c1', 'yo', undefined]])
   })
 
-  it('reacts by posting the emoji as text', async () => {
+  it('reacts with the mapped sticker, ignoring the variation selector, and logs it as a sticker', async () => {
     const api = new FakeZaloApi()
-    expect(await channel(api).react('c1', 'm1', '\u{1F44D}')).toEqual({ as: 'fallback', messageId: 'm100', text: '\u{1F44D}' })
+    const ch = channel(api, { stickers: { '\u{2764}': 'heart1', '\u{1F44D}': 'like1' } })
+    expect(await ch.react('c1', 'm1', '\u{2764}\u{FE0F}')).toEqual({ as: 'fallback', messageId: 'm100', text: '[sticker \u{2764}]' })
+    expect(api.callsTo('sendSticker')[0]!.args).toEqual(['c1', 'heart1'])
+  })
+
+  it('sends an emoji without a sticker as text', async () => {
+    const api = new FakeZaloApi()
+    expect(await channel(api).react('c1', 'm1', '\u{1F525}')).toEqual({ as: 'fallback', messageId: 'm100', text: '\u{1F525}' })
+    expect(api.callsTo('sendSticker')).toHaveLength(0)
   })
 })
 

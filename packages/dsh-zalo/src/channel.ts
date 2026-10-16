@@ -6,7 +6,7 @@ import { ZaloApiError, type ZaloApi } from './zalo-api.ts'
 export interface ZaloChannelDeps {
   api: ZaloApi
   bot: { id: string; accountName: string }
-  config: Pick<Config, 'messageSize' | 'typingIntervalMs'>
+  config: Pick<Config, 'messageSize' | 'typingIntervalMs' | 'stickers'>
   log: { warn(msg: string): void; error(msg: string): void }
 }
 
@@ -58,6 +58,9 @@ async function notice(deps: ZaloChannelDeps, chatId: string, text: string): Prom
   }
 }
 
+/** Emoji compare without the U+FE0F variation selector, as idle already normalizes them. */
+const plain = (emoji: string) => emoji.replaceAll('\u{FE0F}', '')
+
 const withId = (outcome: TurnOutcome, id: string | undefined) => ({ outcome, ...(id === undefined ? {} : { messageId: id }) })
 
 async function deliver(deps: ZaloChannelDeps, chatId: string, report: TurnReport): Promise<{ outcome: TurnOutcome; messageId?: string }> {
@@ -94,10 +97,16 @@ export function createZaloChannel(deps: ZaloChannelDeps): ChatChannel {
       const sent = await deps.api.sendMessage(chatId, text)
       return { as: opts.replyTo === undefined ? 'native' : 'fallback', messageId: sent.messageId, text }
     },
-    // Zalo has no reactions; until stickers arrive the emoji is posted as text.
+    // Zalo has no reactions: a mapped sticker stands in, any other emoji is posted as text.
     async react(chatId, _messageId, emoji) {
-      const sent = await deps.api.sendMessage(chatId, emoji)
-      return { as: 'fallback', messageId: sent.messageId, text: emoji }
+      const wanted = plain(emoji)
+      const sticker = Object.entries(deps.config.stickers).find(([key]) => plain(key) === wanted)?.[1]
+      if (sticker === undefined) {
+        const sent = await deps.api.sendMessage(chatId, wanted)
+        return { as: 'fallback', messageId: sent.messageId, text: wanted }
+      }
+      const sent = await deps.api.sendSticker(chatId, sticker)
+      return { as: 'fallback', messageId: sent.messageId, text: `[sticker ${wanted}]` }
     },
   }
 }

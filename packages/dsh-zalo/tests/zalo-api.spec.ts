@@ -15,6 +15,18 @@ describe('createZaloApi', () => {
     expect(JSON.parse(init.body as string)).toEqual({ chat_id: 'c1', text: 'hi', parse_mode: 'markdown' })
   })
 
+  it('sends a sticker by id and never resends it after a network error', async () => {
+    const fetchImpl = vi.fn(async () => json({ ok: true, result: { message_id: 's1' } }))
+    const api = createZaloApi('TOKEN', retry, fetchImpl as never)
+    expect(await api.sendSticker('c1', 'abc')).toEqual({ messageId: 's1' })
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://bot-api.zaloplatforms.com/botTOKEN/sendSticker')
+    expect(JSON.parse(init.body as string)).toEqual({ chat_id: 'c1', sticker: 'abc' })
+    const failing = vi.fn().mockRejectedValue(new TypeError('fetch failed'))
+    await expect(createZaloApi('T', retry, failing as never).sendSticker('c', 'x')).rejects.toThrow('fetch failed')
+    expect(failing).toHaveBeenCalledTimes(1)
+  })
+
   it('maps getMe fields', async () => {
     const api = createZaloApi('T', retry, (async () => json({ ok: true, result: { id: 'b1', account_name: 'dshbot', display_name: 'Bot Trợ Lý SI' } })) as never)
     expect(await api.getMe()).toEqual({ id: 'b1', accountName: 'dshbot', displayName: 'Bot Trợ Lý SI' })

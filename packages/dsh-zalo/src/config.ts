@@ -19,6 +19,8 @@ export interface Config {
   /** Inbound photos larger than this are not downloaded. */
   readonly maxDownloadMb: number
   readonly retry: RetryConfig
+  /** Emoji to Zalo sticker id, for reactions; Zalo has no native reactions. */
+  readonly stickers: Record<string, string>
 }
 
 export const Config: z<Config> = z.object({
@@ -33,4 +35,5 @@ export const Config: z<Config> = z.object({
     startDelayMs: z.number().min(0).default(500),
     maxDelayMs: z.number().min(0).default(8000),
   }).default({ maxAttempts: 4, startDelayMs: 500, maxDelayMs: 8000 }),
+  stickers: z.dict(z.string()).default({}),
 })
