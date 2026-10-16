@@ -4,3 +4,5 @@ export { ChatLog, formatEntry, oneLine, senderLabel, type ChatLogEntry } from '.
 export type { ChatData } from './migrate/index.ts'
 export { formatMemoryEntry, MemoryStore, renderMemoryBlock, type MemoryEntry, type MemoryLimits, type MemoryScope } from './memory/store.ts'
 export type { ChatSender, TurnContext } from './sessions/agents.ts'
+export { ChatAgents, type AgentRegistryLike, type ModelRoute, type ResolvedAgent } from './sessions/agents.ts'
+export { SessionMap, type ChatSessionRecord } from './sessions/session-map.ts'
