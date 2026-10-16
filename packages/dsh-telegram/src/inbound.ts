@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { chatKey, type ChatLogEntry, type InboundMessage as ChatInbound } from 'dsh-chat'
+import { ACK_REACTION } from './channel.ts'
 import { sanitizeFilename } from './media.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
@@ -219,6 +220,10 @@ export function toInbound(message: TelegramMessage, deps: ToInboundDeps): ChatIn
         return { logEntry: logEntryFor(message, saved), text: '', images: [] }
       }
       const parsed = await parseInbound(message, { api: deps.api, inboxDir, botId: deps.botId, botUsername: deps.botUsername })
+      // Acked as soon as the message is in hand, before the agent is resolved; a chat with reactions disabled must still get its answer.
+      await deps.api.setReaction(message.chat.id, message.message_id, ACK_REACTION).catch((error: unknown) => {
+        deps.log.warn(`dsh-telegram: chat ${message.chat.id} acknowledgement reaction failed (${String(error)})`)
+      })
       return { logEntry: parsed.logEntry, text: parsed.text, images: parsed.images }
     },
   }

@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ACK_REACTION, createTelegramChannel, type TelegramChannelDeps } from '../src/channel.ts'
+import { createTelegramChannel, type TelegramChannelDeps } from '../src/channel.ts'
 import { Config } from '../src/config.ts'
 import { UNDELIVERED_NOTICE, UTF8_BOM } from '../src/render.ts'
 import { TelegramApiError } from '../src/telegram-api.ts'
@@ -22,9 +22,9 @@ const reply = (text: string) => ({ kind: 'reply' as const, text, timeoutMs: 10_0
 const tick = () => new Promise(resolve => setTimeout(resolve, 5))
 
 describe('Telegram turn sink', () => {
-  it('acks the message, shows typing and a reply placeholder, then edits it into the answer', async () => {
+  it('shows typing and a reply placeholder, then edits it into the answer; the ack is not its job', async () => {
     const sink = await channel().openTurn('5', { replyTo: '10' })
-    expect(api.callsTo('setReaction')[0]!.args).toEqual([5, 10, ACK_REACTION])
+    expect(api.callsTo('setReaction')).toHaveLength(0)
     expect(api.callsTo('sendChatAction')).toHaveLength(1)
     expect(api.callsTo('sendMessage')[0]!.args).toEqual([5, 'Thinking...', { replyTo: { messageId: 10 } }])
     const delivered = await sink.deliver(reply('**done**'))
@@ -33,22 +33,19 @@ describe('Telegram turn sink', () => {
     expect(api.callsTo('editMessageText').at(-1)!.args).toEqual([5, 100, '<b>done</b>', { parseMode: 'HTML' }])
   })
 
-  it('a prompt turn neither acks nor quotes', async () => {
+  it('a prompt turn quotes nothing', async () => {
     const sink = await channel().openTurn('5', {})
     await sink.deliver(reply('ok'))
     sink.close()
-    expect(api.callsTo('setReaction')).toHaveLength(0)
     expect(api.callsTo('sendMessage')[0]!.args[2]).toEqual({})
   })
 
-  it('still answers when the ack reaction or typing fails', async () => {
+  it('still answers when typing fails', async () => {
     const warns: string[] = []
-    api.failNext('setReaction', new Error('reactions off'))
     api.failNext('sendChatAction', new Error('typing down'))
     const sink = await channel({ warn: m => warns.push(m), error: () => {} }).openTurn('5', { replyTo: '10' })
     expect((await sink.deliver(reply('ok'))).outcome).toBe('edited')
     sink.close()
-    expect(warns.some(w => w.includes('reactions off'))).toBe(true)
     expect(warns.some(w => w.includes('typing down'))).toBe(true)
   })
 

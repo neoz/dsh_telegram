@@ -188,12 +188,6 @@ async function deliver(target: TurnTarget, placeholder: Placeholder, report: Tur
 async function openTurn(deps: TelegramChannelDeps, chatId: number, replyTo: number | undefined): Promise<TurnSink> {
   const { api, log } = deps
   const now = deps.now ?? Date.now
-  // The reaction is a courtesy; a chat with reactions disabled must still get its answer.
-  if (replyTo !== undefined) {
-    await api.setReaction(chatId, replyTo, ACK_REACTION).catch((error: unknown) => {
-      log.warn(`dsh-telegram: chat ${chatId} acknowledgement reaction failed (${String(error)})`)
-    })
-  }
   await api.sendChatAction(chatId, 'typing').catch((error: unknown) => {
     log.warn(`dsh-telegram: typing indicator failed (${String(error)})`)
   })

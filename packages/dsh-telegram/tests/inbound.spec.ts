@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { displayName, hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, stripBotMention, toInbound, type TelegramMessage } from '../src/inbound.ts'
+import { ACK_REACTION } from '../src/channel.ts'
 import { FakeTelegramApi } from './helpers/fake-api.ts'
 
 let dir: string
@@ -175,6 +176,16 @@ describe('toInbound', () => {
   it('loads the log line in log mode and the turn text in turn mode', async () => {
     const m = toInbound(msg({ text: 'hi' }), deps())!
     expect(await m.load('log')).toMatchObject({ logEntry: { message_id: '10', text: 'hi' }, text: '', images: [] })
+    expect(api.callsTo('setReaction')).toHaveLength(0)
     expect((await m.load('turn')).text).toBe('hi')
+  })
+
+  it('acks a message as soon as it is loaded for a turn, and a failed ack only warns', async () => {
+    expect((await toInbound(msg({ text: 'hi' }), deps())!.load('turn')).text).toBe('hi')
+    expect(api.callsTo('setReaction')[0]!.args).toEqual([5, 10, ACK_REACTION])
+    const warns: string[] = []
+    api.failNext('setReaction', new Error('reactions off'))
+    await toInbound(msg({ text: 'hi' }), { ...deps(), log: { warn: m => warns.push(m) } })!.load('turn')
+    expect(warns.some(w => w.includes('reactions off'))).toBe(true)
   })
 })
