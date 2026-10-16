@@ -35,9 +35,6 @@
   config:
     botToken: !!js process.env.TELEGRAM_BOT_TOKEN
     allowFrom: !!js (process.env.TELEGRAM_ALLOW_FROM ?? '').split(',').map(s => s.trim()).filter(Boolean)
-    workspaceRoot: !!js process.env.DSH_TELEGRAM_WORKSPACE ?? '/workspace'
-    dataDir: !!js process.env.DSH_TELEGRAM_DATA ?? '/data'
-    model: !!js process.env.DSH_MODEL ?? 'deepseek-flash'
     superAdmins: !!js (process.env.TELEGRAM_SUPER_ADMINS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0)
     status:
       thinking: Đang suy nghĩ...

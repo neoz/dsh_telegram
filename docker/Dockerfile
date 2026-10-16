@@ -1,13 +1,16 @@
 FROM node:22-bookworm-slim AS builder
 WORKDIR /build
 RUN corepack enable pnpm && corepack prepare pnpm@10.14.0 --activate
-COPY packages/dsh-telegram/package.json packages/dsh-telegram/pnpm-lock.yaml packages/dsh-telegram/.npmrc ./
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc ./
+COPY packages/dsh-chat/package.json packages/dsh-chat/
+COPY packages/dsh-telegram/package.json packages/dsh-telegram/
+COPY packages/dsh-zalo/package.json packages/dsh-zalo/
 RUN pnpm install --frozen-lockfile
-COPY packages/dsh-telegram/ ./
-# Production install without peers: dsh packages resolve from the dsh installation at runtime.
-RUN pnpm run build \
- && rm -rf node_modules \
- && pnpm install --prod --no-frozen-lockfile --ignore-scripts --config.auto-install-peers=false
+COPY packages/ packages/
+# Production copies without peers: dsh packages and dsh-chat resolve from the profile at runtime.
+RUN pnpm --filter dsh-chat --filter dsh-telegram run build \
+ && pnpm --filter dsh-chat deploy --legacy --prod --config.auto-install-peers=false /out/dsh-chat \
+ && pnpm --filter dsh-telegram deploy --legacy --prod --config.auto-install-peers=false /out/dsh-telegram
 
 FROM node:22-bookworm-slim
 ARG DSH_VERSION=0.2.0-rc.2
@@ -20,9 +23,8 @@ ENV DSH_HOME=/dsh-home
 ENV DSH_AGENTS_HOME=/dsh-home/.agents
 # The profile template lives outside the volume so image rebuilds refresh it.
 COPY profile/telegram/ /opt/dsh-telegram/profile/
-COPY --from=builder /build/package.json /build/cordis.patch.yml /opt/dsh-telegram/profile/node_modules/dsh-telegram/
-COPY --from=builder /build/lib /opt/dsh-telegram/profile/node_modules/dsh-telegram/lib
-COPY --from=builder /build/node_modules /opt/dsh-telegram/profile/node_modules/dsh-telegram/node_modules
+COPY --from=builder /out/dsh-chat /opt/dsh-telegram/profile/node_modules/dsh-chat
+COPY --from=builder /out/dsh-telegram /opt/dsh-telegram/profile/node_modules/dsh-telegram
 # Extra profile bundles: pinned registry tarballs whose only dependencies are already in the dsh closure.
 ARG SEARXNG_PLUGIN_VERSION=0.5.1
 RUN mkdir -p /tmp/bundles /opt/dsh-telegram/profile/node_modules/dsh-web-search-searxng  && cd /tmp/bundles  && npm pack dsh-web-search-searxng@${SEARXNG_PLUGIN_VERSION} --silent  && tar -xzf dsh-web-search-searxng-*.tgz -C /opt/dsh-telegram/profile/node_modules/dsh-web-search-searxng --strip-components=1  && rm -rf /tmp/bundles

@@ -27,14 +27,35 @@
           default: !!js Number(process.env.DSH_LOG_LEVEL ?? 2)
         showTime: 'yyyy-MM-dd hh:mm:ss '
 
+    - id: chat-migrate
+      name: dsh-chat/migrate
+      config:
+        dataDir: !!js process.env.DSH_ZALO_DATA ?? '/data'
+        workspaceRoot: !!js process.env.DSH_ZALO_WORKSPACE ?? '/workspace'
+        legacyChannel: zalo
+
+    - id: chat-log
+      name: dsh-chat/log
+
+    - id: chat-memory
+      name: dsh-chat/memory
+
+    - id: chat-sessions
+      name: dsh-chat/sessions
+      config:
+        model: !!js process.env.DSH_MODEL ?? 'deepseek-flash'
+
+    - id: chat-history
+      name: dsh-chat/history
+
+    - id: chat-retention
+      name: dsh-chat/retention
+
     - id: zalo
       name: dsh-zalo
       config:
         botToken: !!js process.env.ZALO_BOT_TOKEN
         allowFrom: !!js (process.env.ZALO_ALLOW_FROM ?? '').split(',').map(s => s.trim()).filter(Boolean)
-        workspaceRoot: !!js process.env.DSH_ZALO_WORKSPACE ?? '/workspace'
-        dataDir: !!js process.env.DSH_ZALO_DATA ?? '/data'
-        model: !!js process.env.DSH_MODEL ?? 'deepseek-flash'
         superAdmins: !!js (process.env.ZALO_SUPER_ADMINS ?? '').split(',').map(s => s.trim()).filter(Boolean)
 
     # Zalo sends no browser zone, so the clock always formats in this fallback zone.

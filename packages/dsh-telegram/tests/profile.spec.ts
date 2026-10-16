@@ -78,3 +78,40 @@ describe('profile patch', () => {
     }
   })
 })
+
+describe('dsh-chat rows', () => {
+  const ids = ['chat-migrate', 'chat-log', 'chat-memory', 'chat-sessions', 'chat-history', 'chat-retention']
+
+  it('inserts every dsh-chat plugin before the bot row', async () => {
+    const list = await rows('../cordis.patch.yml')
+    const inserted = list.flatMap(r => r.insert ?? []).map(r => r.id)
+    for (const id of ids) expect(inserted.indexOf(id)).toBeGreaterThanOrEqual(0)
+    for (const id of ids) expect(inserted.indexOf(id)).toBeLessThan(inserted.indexOf('telegram'))
+    for (const id of ids) expect(row(list, id).name).toBe(`dsh-chat/${id.slice('chat-'.length)}`)
+  })
+
+  it('maps the old env vars to the migrate and sessions rows', async () => {
+    const list = await rows('../cordis.patch.yml')
+    const migrateRow = row(list, 'chat-migrate').config!
+    expect(evalJs(migrateRow.dataDir, { DSH_TELEGRAM_DATA: '/x' })).toBe('/x')
+    expect(evalJs(migrateRow.dataDir, {})).toBe('/data')
+    expect(evalJs(migrateRow.workspaceRoot, {})).toBe('/workspace')
+    expect(migrateRow.legacyChannel).toBe('telegram')
+    expect(evalJs(row(list, 'chat-sessions').config!.model, {})).toBe('deepseek-flash')
+    expect(evalJs(row(list, 'chat-sessions').config!.model, { DSH_MODEL: 'm2' })).toBe('m2')
+  })
+
+  it('keeps paths and model off the bot row', async () => {
+    for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
+      const config = row(await rows(path), 'telegram').config!
+      for (const key of ['dataDir', 'workspaceRoot', 'model']) expect(config).not.toHaveProperty(key)
+    }
+  })
+
+  it('lists dsh-chat as a profile bundle before the adapter', async () => {
+    const pkg = JSON.parse(await readFile(new URL('../../../profile/telegram/package.json', import.meta.url), 'utf8'))
+    const bundles: string[] = pkg.dsh.profile.bundles
+    expect(bundles.indexOf('dsh-chat')).toBeGreaterThanOrEqual(0)
+    expect(bundles.indexOf('dsh-chat')).toBeLessThan(bundles.indexOf('dsh-telegram'))
+  })
+})

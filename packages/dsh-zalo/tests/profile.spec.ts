@@ -23,7 +23,7 @@ describe('profile patch', () => {
   it('maps env vars to a valid zalo row with string ids', async () => {
     for (const path of PATHS) {
       const config = Config(resolve(row(await rows(path), 'zalo').config, env))
-      expect(config).toMatchObject({ botToken: 't', allowFrom: ['a1', 'b2'], superAdmins: ['a1'], workspaceRoot: '/workspace', dataDir: '/data', model: 'deepseek-flash' })
+      expect(config).toMatchObject({ botToken: 't', allowFrom: ['a1', 'b2'], superAdmins: ['a1'] })
     }
   })
   it('mounts the plugin, its logger and a local clock', async () => {
@@ -36,5 +36,38 @@ describe('profile patch', () => {
     for (const path of PATHS) {
       expect(JSON.stringify(row(await rows(path), 'system-prompt').config)).not.toMatch(/send_file/)
     }
+  })
+})
+
+describe('dsh-chat rows', () => {
+  const ids = ['chat-migrate', 'chat-log', 'chat-memory', 'chat-sessions', 'chat-history', 'chat-retention']
+
+  it('inserts every dsh-chat plugin before the bot row', async () => {
+    const list = await rows('../cordis.patch.yml')
+    const inserted = list.flatMap(r => r.insert ?? []).map(r => r.id)
+    for (const id of ids) expect(inserted.indexOf(id)).toBeGreaterThanOrEqual(0)
+    for (const id of ids) expect(inserted.indexOf(id)).toBeLessThan(inserted.indexOf('zalo'))
+    for (const id of ids) expect(row(list, id).name).toBe(`dsh-chat/${id.slice('chat-'.length)}`)
+  })
+
+  it('maps the old env vars to the migrate and sessions rows', async () => {
+    const list = await rows('../cordis.patch.yml')
+    expect(resolve(row(list, 'chat-migrate').config, { DSH_ZALO_DATA: '/x' })).toEqual({ dataDir: '/x', workspaceRoot: '/workspace', legacyChannel: 'zalo' })
+    expect(resolve(row(list, 'chat-migrate').config, {})).toMatchObject({ dataDir: '/data' })
+    expect(resolve(row(list, 'chat-sessions').config, {})).toEqual({ model: 'deepseek-flash' })
+  })
+
+  it('keeps paths and model off the bot row', async () => {
+    for (const path of PATHS) {
+      const config = row(await rows(path), 'zalo').config!
+      for (const key of ['dataDir', 'workspaceRoot', 'model']) expect(config).not.toHaveProperty(key)
+    }
+  })
+
+  it('lists dsh-chat as a profile bundle before the adapter', async () => {
+    const pkg = JSON.parse(await readFile(new URL('../../../profile/zalo/package.json', import.meta.url), 'utf8'))
+    const bundles: string[] = pkg.dsh.profile.bundles
+    expect(bundles.indexOf('dsh-chat')).toBeGreaterThanOrEqual(0)
+    expect(bundles.indexOf('dsh-chat')).toBeLessThan(bundles.indexOf('dsh-zalo'))
   })
 })
