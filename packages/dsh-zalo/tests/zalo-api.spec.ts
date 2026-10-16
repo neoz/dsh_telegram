@@ -115,6 +115,21 @@ describe('createZaloApi', () => {
   })
 })
 
+describe('error messages', () => {
+  it('names the error code and the body when Zalo refuses without a description', async () => {
+    const api = createZaloApi('T', retry, (async () => json({ ok: false, error_code: 500 })) as never)
+    const error = await api.sendChatAction('c', 'typing').then(() => undefined, (e: unknown) => e as ZaloApiError)
+    expect(error!.message).toBe('sendChatAction failed: HTTP 200, error_code 500, body {"ok":false,"error_code":500}')
+    expect(error!.code).toBe(500)
+  })
+
+  it('keeps a body that is not JSON, cut short', async () => {
+    const api = createZaloApi('T', retry, (async () => new Response('x'.repeat(500), { status: 200 })) as never)
+    const error = await api.sendChatAction('c', 'typing').then(() => undefined, (e: unknown) => e as ZaloApiError)
+    expect(error!.message).toBe(`sendChatAction failed: HTTP 200, body ${'x'.repeat(200)}...`)
+  })
+})
+
 describe('photo field', () => {
   it('reads the photo from photo_url, which Zalo really sends, as well as the documented photo', async () => {
     const real = { event_name: 'message.image.received', message: { message_id: 'm1', date: 1, from: { id: 'u' }, chat: { id: 'c', chat_type: 'PRIVATE' }, message_type: 'CHAT_PHOTO', photo_url: 'https://z/p.jpg' } }

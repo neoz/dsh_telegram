@@ -84,6 +84,8 @@ const REQUEST_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 60_000
 /** Zalo answers an empty long poll with this code. */
 const POLL_TIMEOUT_CODE = 408
+/** Characters of a refused response body kept in the error message. */
+const BODY_IN_ERROR = 200
 
 /** Resolves after `ms`, or rejects at once when `signal` aborts, so a stopping poller never waits out a backoff. */
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
@@ -142,9 +144,21 @@ export function createZaloApi(token: string, retry: RetryConfig, fetchImpl: type
       body: JSON.stringify(body),
       signal: signal === undefined ? AbortSignal.timeout(timeoutMs) : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     }), signal, idempotent)
-    const payload = await response.json().catch(() => undefined) as Envelope<T> | undefined
+    const text = await response.text().catch(() => '')
+    let payload: Envelope<T> | undefined
+    try {
+      payload = JSON.parse(text) as Envelope<T>
+    } catch {
+      payload = undefined
+    }
     if (payload?.ok !== true) {
-      throw new ZaloApiError(`${method} failed: ${payload?.description ?? `HTTP ${response.status}`}`, payload?.error_code ?? response.status)
+      // Zalo often refuses with HTTP 200 and no description; the code and body are then all there is to go on.
+      const detail = payload?.description ?? [
+        `HTTP ${response.status}`,
+        ...(payload?.error_code === undefined ? [] : [`error_code ${payload.error_code}`]),
+        `body ${text.length > BODY_IN_ERROR ? `${text.slice(0, BODY_IN_ERROR)}...` : text}`,
+      ].join(', ')
+      throw new ZaloApiError(`${method} failed: ${detail}`, payload?.error_code ?? response.status)
     }
     return payload.result
   }
