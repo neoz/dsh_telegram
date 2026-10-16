@@ -33,20 +33,20 @@ This supersedes the "Code sharing" decision of
 | Prompt cache | The rendered persona prefix, `<memory>` block and `<chat_history>` block stay byte-identical to the current output. Channel-specific wording lives only in the persona suffix set by each adapter's patch. |
 | Events | `telegram/turn`, `telegram/message`, `zalo/*` become `chat/turn(chatKey)` and `chat/message(chatKey, entry)`. |
 | Per-chat tools | `dsh-chat/sessions` emits `chat/agent(agentCtx, chatKey)` when it creates or resumes a chat's agent. `memory`, `history` and the router (for `channel.agentTools`) register their tools on `agentCtx` in that listener, replacing today's `registerChatTools` setup callback. |
-| Dependency direction | Stores never inject `chat`, so there is no cycle: `migrate` <- `log`, `sessions` <- `memory`, `history` <- router <- `retention`, `idle`, `schedule`. The router sets `TurnContext { sender, isGroup, isSuperAdmin }` through `chatAgents.setTurn`, so memory tools read the super-admin flag from `chatAgents.turnOf(chatKey)` instead of from router config. |
+| Dependency direction | Stores never inject `chat`, so there is no cycle: `migrate` <- `log`, `sessions` <- `memory`, `history` <- router <- `idle`, `schedule`; `retention` needs only `chatData`. The router sets `TurnContext { sender, isGroup, isSuperAdmin }` through `chatAgents.setTurn`, so memory tools read the super-admin flag from `chatAgents.turnOf(chatKey)` instead of from router config. |
 | Out of scope | Merging the two existing `global.json` files, new channels, file sending for Zalo. |
 
 ## Plugins
 
 | Plugin | Provides | Injects | Responsibility |
 |---|---|---|---|
-| `dsh-chat/migrate` | `chatMigrated` (empty) | — | One-time layout migration; see below. |
-| `dsh-chat/log` | `chatLog` | `chatMigrated` | JSONL chat log per `chatKey`; forwards appends as `chat/message`, a throwing listener only warns. |
-| `dsh-chat/memory` | `chatMemory` | `chatMigrated`, `chatAgents` | Memory store, `memory_save` / `memory_recall` / `memory_forget`, the `<memory>` block. |
-| `dsh-chat/sessions` | `chatAgents` | `chatMigrated`, `agents` | Session map and `ChatAgents`: create or resume one agent per `chatKey`, per-chat workspace, turn context. |
+| `dsh-chat/migrate` | `chatData` (`{ dataDir, workspaceRoot }`) | — | One-time layout migration, then provides the shared paths; see below. |
+| `dsh-chat/log` | `chatLog` | `chatData` | JSONL chat log per `chatKey`; forwards appends as `chat/message`, a throwing listener only warns. |
+| `dsh-chat/memory` | `chatMemory` | `chatData`, `chatAgents` | Memory store, `memory_save` / `memory_recall` / `memory_forget`, the `<memory>` block. |
+| `dsh-chat/sessions` | `chatAgents` | `chatData`, `agents` | Session map and `ChatAgents`: create or resume one agent per `chatKey`, per-chat workspace, turn context. |
 | `dsh-chat` (router) | `chat` | `chatLog`, `chatMemory`, `chatAgents`, `attachments`, `loader` | Channel registry, per-`chatKey` queue, shared gate (allowlist, `/reset`, `/stop`, `/help`), turn orchestration, `chat/turn`. |
 | `dsh-chat/history` | — | `chatLog`, `chatAgents` | `chat_history` tool (replaces `telegram_chat_history`). |
-| `dsh-chat/retention` | — | `chat` | Daily sweep of `inbox` / `outbox` under `/workspace/<channel>/<id>`. |
+| `dsh-chat/retention` | — | `chatData` | Daily sweep of `inbox` / `outbox` under `/workspace/<channel>/<id>`. |
 | `dsh-chat/idle` | — | `chat`, `chatLog`, `llm`, `attachments` | Moved from `dsh-telegram/idle`. |
 | `dsh-chat/schedule` | — | `chat`, `tools` | Moved from `dsh-telegram/schedule`. |
 
@@ -123,7 +123,7 @@ The `chat` service exposes `register(channel)` (returns an unregister function),
 ```
 /data/
   memory/global.json
-  <channel>/sessions.json
+  sessions.json                 (keyed by chatKey)
   <channel>/chatlog/<id>.jsonl
   <channel>/memory/<id>.json
   <channel>/idle-decisions.jsonl
@@ -132,18 +132,18 @@ The `chat` service exposes `register(channel)` (returns an unregister function),
 /workspace/<channel>/<id>/{inbox,outbox}
 ```
 
-`dsh-chat/migrate` runs in `apply`; store plugins inject `chatMigrated`, so they
+`dsh-chat/migrate` runs in `apply`; store plugins inject `chatData`, so they
 load only after it. Config: `legacyChannel: 'telegram' | 'zalo'`, set by each
 adapter's patch, because each image's `/data` volume holds one channel today.
 
-1. If `.migrated-v1` exists, provide `chatMigrated` and stop.
+1. If `.migrated-v1` exists, provide `chatData` and stop.
 2. `rename` (same volume) `chatlog/*`, `memory/<id>.json`,
-   `<legacyChannel>-sessions.json`, `idle-decisions.jsonl`, `schedule.json` into
+   `idle-decisions.jsonl`, `schedule.json` into
    `<legacyChannel>/`. `memory/global.json` stays.
 3. Move `/workspace/<id>` to `/workspace/<legacyChannel>/<id>`.
-4. Delete the old session map: stored agent sessions keep the old `cwd`, so each
+4. Delete the old `<legacyChannel>-sessions.json`: stored agent sessions keep the old `cwd`, so each
    chat starts a new session.
-5. Write the marker and provide `chatMigrated`.
+5. Write the marker and provide `chatData`.
 
 Every step skips files already at their destination, so a rerun is safe. On a
 failure the plugin logs the error, writes no marker and throws from `apply`, so
@@ -190,3 +190,16 @@ Each step leaves the repository green and deployable.
 4. Idle and schedule moved to `dsh-chat`, events renamed; Zalo gains both.
 5. Dockerfiles install `dsh-chat` as a sibling bundle, `build-and-push.ps1`
    updated, and a sample two-channel profile added.
+
+## Clarifications from planning
+
+- The `dsh-chat` package is a dsh bundle with an empty patch, so the loader
+  resolves `dsh-chat/*` rows; each adapter's patch inserts the rows it needs.
+- Chat log ids are strings (`message_id`, `user_id`, `reply_to`). The migration
+  rewrites Telegram chat logs, whose ids are numbers, to strings.
+- Group context and `chat_history` paging use the position of an entry in the
+  log, not its timestamp: Telegram `ts` has one-second precision. The session
+  record keeps `lastTurnMessageId: string`; context is every entry after the last
+  non-bot entry with that id (all entries when it is absent or trimmed away).
+- Until the router exists (rollout step 3), each adapter keeps its own config
+  for `superAdmins` and computes `TurnContext.isSuperAdmin` itself.
