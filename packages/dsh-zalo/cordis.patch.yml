@@ -51,7 +51,8 @@
     - id: chat
       name: dsh-chat
       config:
-        allowFrom: !!js (process.env.ZALO_ALLOW_FROM ?? '').split(',').map(s => s.trim()).filter(Boolean).map(s => 'zalo:' + s)
+        # Super admins are always let in on Zalo: their commands and global-memory rights would be useless otherwise.
+        allowFrom: !!js Array.from(new Set([process.env.ZALO_ALLOW_FROM, process.env.ZALO_SUPER_ADMINS].join(',').split(',').map(s => s.trim()).filter(Boolean)), s => 'zalo:' + s)
         superAdmins: !!js (process.env.ZALO_SUPER_ADMINS ?? '').split(',').map(s => s.trim()).filter(Boolean).map(s => 'zalo:' + s)
 
     - id: chat-retention

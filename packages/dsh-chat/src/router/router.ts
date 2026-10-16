@@ -10,7 +10,7 @@ import { runAgentTurn, type AgentTurnResult, type SessionEventFeed } from './tur
 export interface RouterConfig {
   /** userKeys allowed to get a turn; a Telegram username is written `telegram:@name`. */
   readonly allowFrom: string[]
-  /** userKeys that may run commands and edit global memory; always allowed. */
+  /** userKeys that may run commands and edit global memory; they still need to be in `allowFrom` to get a turn. */
   readonly superAdmins: string[]
   readonly recentMessagesLimit: number
   readonly turnTimeoutMs: number
@@ -45,7 +45,7 @@ const RESUME_FAILED = 'The previous conversation could not be restored; starting
 const MAX_STRANGERS = 1000
 
 export function commandOf(text: string): Command | undefined {
-  const match = /^\s*\/(reset|stop|help)\s*$/.exec(text)
+  const match = /^\/(reset|stop|help)\s*$/.exec(text)
   return match === null ? undefined : match[1] as Command
 }
 
@@ -127,8 +127,7 @@ export class ChatRouter {
     const { channel } = splitKey(key)
     const userKey = chatKey(channel, sender.id)
     const byName = sender.username === undefined ? undefined : `${channel}:@${sender.username.toLowerCase()}`
-    return this.isSuperAdmin(key, sender)
-      || this.deps.config.allowFrom.some(entry => entry === userKey || (byName !== undefined && entry.toLowerCase() === byName))
+    return this.deps.config.allowFrom.some(entry => entry === userKey || (byName !== undefined && entry.toLowerCase() === byName))
   }
 
   /** Ids are opaque on some platforms, so this line is how an operator learns what to put in allowFrom; once per sender. */

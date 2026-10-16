@@ -17,7 +17,7 @@ const resolve = (value: any, env: Record<string, string>): any => (value !== nul
   : value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolve(v, env)])) : value)
 
 const PATHS = ['../../../profile/zalo/cordis.patch.yml', '../cordis.patch.yml']
-const env = { ZALO_BOT_TOKEN: 't', ZALO_ALLOW_FROM: 'a1, b2,', ZALO_SUPER_ADMINS: 'a1' }
+const env = { ZALO_BOT_TOKEN: 't', ZALO_ALLOW_FROM: 'a1, b2,', ZALO_SUPER_ADMINS: 'a1, s9' }
 
 describe('profile patch', () => {
   it('maps env vars to a valid zalo row that leaves the allowlist to the router', async () => {
@@ -32,7 +32,8 @@ describe('profile patch', () => {
     const bundle = await rows('../cordis.patch.yml')
     const chat = row(bundle, 'chat')
     expect(chat.name).toBe('dsh-chat')
-    expect(resolve(chat.config, env)).toEqual({ allowFrom: ['zalo:a1', 'zalo:b2'], superAdmins: ['zalo:a1'] })
+    // Super admins are always let in on Zalo, as before the router: their commands would be useless otherwise.
+    expect(resolve(chat.config, env)).toEqual({ allowFrom: ['zalo:a1', 'zalo:b2', 'zalo:s9'], superAdmins: ['zalo:a1', 'zalo:s9'] })
     const ids = bundle.flatMap(r => r.insert ?? []).map(r => r.id)
     expect(ids.indexOf('chat')).toBeLessThan(ids.indexOf('zalo'))
   })

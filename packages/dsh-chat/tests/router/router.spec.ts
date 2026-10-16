@@ -47,7 +47,7 @@ function fakeAgentFor(key: string) {
 
 function router(config: Partial<RouterConfig> = {}): ChatRouter {
   const r = new ChatRouter({
-    config: { allowFrom: ['telegram:@ann', 'zalo:7'], superAdmins: ['telegram:7'], recentMessagesLimit: 30, turnTimeoutMs: 10_000, ...config },
+    config: { allowFrom: ['telegram:@ann', 'zalo:7', 'telegram:7'], superAdmins: ['telegram:7'], recentMessagesLimit: 30, turnTimeoutMs: 10_000, ...config },
     chatLog,
     memory,
     agents: agents as never,
@@ -109,7 +109,8 @@ afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 describe('commandOf', () => {
   it('reads bare commands only', () => {
     expect(commandOf('/reset')).toBe('reset')
-    expect(commandOf('  /stop ')).toBe('stop')
+    expect(commandOf('/stop ')).toBe('stop')
+    expect(commandOf(' /stop')).toBeUndefined()
     expect(commandOf('/help')).toBe('help')
     expect(commandOf('/stop@other')).toBeUndefined()
     expect(commandOf('reset please')).toBeUndefined()
@@ -132,14 +133,14 @@ describe('ChatRouter', () => {
     expect(turnsNoted).toEqual(['telegram:5', 'telegram:5'])
   })
 
-  it('allows a Telegram username case-insensitively and a super admin not in allowFrom', async () => {
+  it('allows a Telegram username case-insensitively; super admin rights alone do not let a sender in', async () => {
     const r = router({ allowFrom: ['telegram:@ann'], superAdmins: ['zalo:9'] })
     r.inbound(message({ chatKey: 'telegram:5' }))
     r.inbound(message({ chatKey: 'zalo:6', sender: bob }))
     await idle(r, 'telegram:5')
     await idle(r, 'zalo:6')
     expect(telegram.turns).toHaveLength(1)
-    expect(zalo.turns).toHaveLength(1)
+    expect(zalo.turns).toHaveLength(0)
   })
 
   it('ignores a DM stranger without logging the chat, and names the stranger once', async () => {
