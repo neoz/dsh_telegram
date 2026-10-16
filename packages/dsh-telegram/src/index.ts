@@ -202,11 +202,11 @@ export function apply(ctx: Context, config: Config): void {
       if (started === undefined) return
       const { polling, unregister } = started
       started = undefined
-      // Dependants stop first, while the bot can still serve their last calls; queued turns are then skipped.
+      // Dependants stop first, while the bot can still serve their last calls. Polling stops before the
+      // channel goes, so an update already in flight still finds it; queued turns are skipped after that.
       revoke?.()
       revoke = undefined
-      unregister()
-      return polling.stop()
+      return polling.stop().finally(unregister)
     }
   }, 'dsh-telegram: bot runner')
 }

@@ -16,7 +16,7 @@ vi.mock('grammy', () => ({
 vi.mock('@grammyjs/runner', () => ({
   run: () => {
     order.push('poll')
-    return { task: () => undefined, isRunning: () => false, stop: async () => {} }
+    return { task: () => undefined, isRunning: () => true, stop: async () => { order.push('stop') } }
   },
 }))
 vi.mock('../src/telegram-api.ts', async (importOriginal) => ({
@@ -32,9 +32,12 @@ describe('dsh-telegram start', () => {
     root.provide('chatData', { dataDir: '/d', workspaceRoot: '/w' } as never)
     root.provide('chatLog', {} as never)
     root.provide('chatAgents', { workspaceFor: () => '/w', selection: { provider: 'p', model: 'm' } } as never)
-    root.provide('chat', { register: () => { order.push('register'); return () => {} }, inbound: () => {}, superAdmins: [] } as never)
-    root.plugin(telegram, telegram.Config({ botToken: 't' }))
+    root.provide('chat', { register: () => { order.push('register'); return () => { order.push('unregister') } }, inbound: () => {}, superAdmins: [] } as never)
+    const fork = root.plugin(telegram, telegram.Config({ botToken: 't' }))
     await vi.waitFor(() => expect(order).toContain('poll'))
     expect(order).toEqual(['register', 'poll'])
+    // Polling stops first, so an update already in flight still finds its channel.
+    await fork.dispose()
+    expect(order).toEqual(['register', 'poll', 'stop', 'unregister'])
   })
 })

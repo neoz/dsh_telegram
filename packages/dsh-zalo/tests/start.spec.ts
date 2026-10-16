@@ -12,7 +12,7 @@ vi.mock('../src/poller.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('../src/poller.ts')>(),
   startPolling: () => {
     order.push('poll')
-    return { stop: async () => {} }
+    return { stop: async () => { order.push('stop') } }
   },
 }))
 
@@ -22,9 +22,12 @@ describe('dsh-zalo start', () => {
     const root = new Context()
     root.provide('loader', { await: async () => {} } as never)
     root.provide('chatAgents', { workspaceFor: () => '/w' } as never)
-    root.provide('chat', { register: () => { order.push('register'); return () => {} }, inbound: () => {} } as never)
-    root.plugin(zalo, zalo.Config({ botToken: 't' }))
+    root.provide('chat', { register: () => { order.push('register'); return () => { order.push('unregister') } }, inbound: () => {} } as never)
+    const fork = root.plugin(zalo, zalo.Config({ botToken: 't' }))
     await vi.waitFor(() => expect(order).toContain('poll'))
     expect(order).toEqual(['register', 'poll'])
+    // Polling stops first, so an update already in flight still finds its channel.
+    await fork.dispose()
+    expect(order).toEqual(['register', 'poll', 'stop', 'unregister'])
   })
 })

@@ -108,9 +108,9 @@ export function apply(ctx: Context, config: Config): void {
       if (started === undefined) return
       const { poller, unregister } = started
       started = undefined
-      // Queued messages must not start turns on a bot that is going away.
-      unregister()
-      return poller.stop()
+      // Polling stops before the channel goes, so an update already in flight still finds it;
+      // queued messages then never start turns on a bot that is going away.
+      return poller.stop().finally(unregister)
     }
   }, 'dsh-zalo: bot runner')
 }
