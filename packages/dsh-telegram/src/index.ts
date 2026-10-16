@@ -6,32 +6,23 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { autoRetry } from '@grammyjs/auto-retry'
 import { run, type RunnerHandle } from '@grammyjs/runner'
 import { chatKey, idIn } from 'dsh-chat'
-import type {} from 'dsh-chat/log'
-import type {} from 'dsh-chat/migrate'
 import type {} from 'dsh-chat/sessions'
 import { Bot } from 'grammy'
 import { createTelegramChannel } from './channel.ts'
 import { Config } from './config.ts'
 import { toInbound, type TelegramMessage } from './inbound.ts'
-import { telegramTurn, type TelegramService } from './service.ts'
 import { createGrammyApi, type TelegramApi } from './telegram-api.ts'
 import { createSendFileTool } from './tools.ts'
 
 export { Config } from './config.ts'
 export type { Config as TelegramConfig } from './config.ts'
-export type { TelegramService } from './service.ts'
 
 /** Cordis plugin name. */
 export const name = 'dsh-telegram'
 /** The router and stores come from the dsh-chat plugins. */
-export const inject = ['loader', 'chatData', 'chatLog', 'chatAgents', 'chat']
+export const inject = ['loader', 'chatAgents', 'chat']
 
-interface Started { polling: Polling; api: TelegramApi; unregister: () => void; service: TelegramService }
-
-const telegramIds = (keys: readonly string[]) => keys.flatMap((key) => {
-  const id = idIn('telegram', key)
-  return id === undefined ? [] : [Number(id)]
-})
+interface Started { polling: Polling; api: TelegramApi; unregister: () => void }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -75,32 +66,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
 
   const polling = startPolling(bot, config, log)
   log.info(`dsh-telegram: polling as @${botUsername}`)
-  const key = (chatId: number) => chatKey('telegram', chatId)
-  return {
-    polling,
-    api,
-    unregister,
-    service: {
-      api,
-      chatLog: ctx.chatLog,
-      queue: { enqueue: (chatId, task) => ctx.chat.enqueue(key(chatId), task), isBusy: chatId => ctx.chat.isBusy(key(chatId)) },
-      bot: { id: botId, username: botUsername },
-      selection: agents.selection,
-      dataDir: join(ctx.chatData.dataDir, 'telegram'),
-      superAdmins: telegramIds(ctx.chat.superAdmins),
-      chatOf: (agentId) => {
-        const found = ctx.chat.chatOf(agentId)
-        const id = found === undefined ? undefined : idIn('telegram', found)
-        return id === undefined ? undefined : Number(id)
-      },
-      turnOf: chatId => telegramTurn(ctx.chat.turnOf(key(chatId))),
-      prompt: (chatId, input) => ctx.chat.prompt(key(chatId), {
-        text: input.text,
-        sender: { id: String(input.sender.id), name: input.sender.first_name, ...(input.sender.username === undefined ? {} : { username: input.sender.username }) },
-        isGroup: chatId < 0,
-      }),
-    },
-  }
+  return { polling, api, unregister }
 }
 
 interface Polling { stop(): Promise<void> }
@@ -166,22 +132,12 @@ const STARTUP_BACKOFF = { startDelayMs: 5_000, maxDelayMs: 300_000 }
 export function apply(ctx: Context, config: Config): void {
   const log = loggerFor(ctx)
   let started: Started | undefined
-  let revoke: (() => void) | undefined
   let stopped = false
   ctx.on('chat/agent', (agentCtx, key) => {
     const id = idIn('telegram', key)
     if (id === undefined) return
     const tool = createSendFileTool({ api: () => started?.api, chatId: Number(id), workspaceDir: ctx.chatAgents.workspaceFor(key), maxUploadBytes: config.retry.maxUploadMb * 1024 * 1024 })
     agentCtx.effect(() => agentCtx.tools.register(tool), 'dsh-telegram: telegram_send_file')
-  })
-  // Idle engagement listens to telegram/* with numeric chat ids until it moves to dsh-chat.
-  ctx.on('chat/message', (key, entry) => {
-    const id = idIn('telegram', key)
-    if (id !== undefined) ctx.emit('telegram/message', Number(id), entry)
-  })
-  ctx.on('chat/turn', (key) => {
-    const id = idIn('telegram', key)
-    if (id !== undefined) ctx.emit('telegram/turn', Number(id))
   })
   ctx.effect(() => {
     const cancel = retryStart(() => start(ctx, config), (result) => {
@@ -191,8 +147,6 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       started = result
-      // Provided only now: Cordis starts dependants as soon as a name is provided, with or without a value.
-      revoke = ctx.provide('telegram', result.service)
     }, (error, delayMs) => {
       log.error(`dsh-telegram: failed to start: ${error instanceof Error ? error.stack ?? error.message : String(error)}; retrying in ${delayMs}ms`)
     }, STARTUP_BACKOFF)
@@ -202,10 +156,8 @@ export function apply(ctx: Context, config: Config): void {
       if (started === undefined) return
       const { polling, unregister } = started
       started = undefined
-      // Dependants stop first, while the bot can still serve their last calls. Polling stops before the
-      // channel goes, so an update already in flight still finds it; queued turns are skipped after that.
-      revoke?.()
-      revoke = undefined
+      // Polling stops before the channel goes, so an update already in flight still finds it;
+      // queued turns are skipped after that.
       return polling.stop().finally(unregister)
     }
   }, 'dsh-telegram: bot runner')

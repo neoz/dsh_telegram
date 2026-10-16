@@ -1,4 +1,4 @@
-# dsh-telegram bundle layer: console logging, persona for a chat assistant, the bot row and idle engagement.
+# dsh-telegram bundle layer: console logging, persona for a chat assistant, the bot row, and the shared dsh-chat idle and reminder rows.
 - id: system-prompt
   config:
     personaPrefix: >-
@@ -68,11 +68,11 @@
       config:
         timeZone: Asia/Ho_Chi_Minh
 
-    - id: telegram-idle
-      name: dsh-telegram/idle
+    - id: chat-idle
+      name: dsh-chat/idle
       config:
         enabled: !!js process.env.TELEGRAM_IDLE_ENABLED === 'true'
-        chatIds: !!js (process.env.TELEGRAM_IDLE_CHATS ?? '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n !== 0)
+        chatKeys: !!js (process.env.TELEGRAM_IDLE_CHATS ?? '').split(',').map(s => s.trim()).filter(s => /^-?[1-9]\d*$/.test(s)).map(s => 'telegram:' + s)
         idleMinutes: 10
         minNewMessages: 5
         chance: 1
@@ -80,8 +80,8 @@
         slotGapMinutes: 10
         maxPerDay: 24
 
-    - id: telegram-schedule
-      name: dsh-telegram/schedule
+    - id: chat-schedule
+      name: dsh-chat/schedule
       config:
         timeZone: Asia/Ho_Chi_Minh
         maxPerChat: 20

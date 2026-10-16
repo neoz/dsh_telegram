@@ -14,7 +14,7 @@ function row(list: Row[], id: string): Row {
   return (list.find(r => r.id === id) ?? list.flatMap(r => r.insert ?? []).find(r => r.id === id))!
 }
 function telegramIdle(list: Row[]): Record<string, any> {
-  return row(list, 'telegram-idle').config!
+  return row(list, 'chat-idle').config!
 }
 function evalJs(value: { js: string }, env: Record<string, string>): unknown {
   return new Function('process', `return (${value.js})`)({ env })
@@ -31,8 +31,8 @@ describe('profile patch', () => {
   it('maps idle env vars, keeping negative supergroup ids', async () => {
     for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
       const config = telegramIdle(await rows(path))
-      expect(evalJs(config.chatIds, { TELEGRAM_IDLE_CHATS: '-1001234567890, 42,' })).toEqual([-1001234567890, 42])
-      expect(evalJs(config.chatIds, {})).toEqual([])
+      expect(evalJs(config.chatKeys, { TELEGRAM_IDLE_CHATS: '-1001234567890, 42, 0, x,' })).toEqual(['telegram:-1001234567890', 'telegram:42'])
+      expect(evalJs(config.chatKeys, {})).toEqual([])
       expect(evalJs(config.enabled, { TELEGRAM_IDLE_ENABLED: 'true' })).toBe(true)
       expect(evalJs(config.enabled, {})).toBe(false)
     }
@@ -47,11 +47,15 @@ describe('profile patch', () => {
     }
   })
 
-  it('keeps idle off the telegram row and mounts the idle plugin', async () => {
+  it('keeps idle off the telegram row and mounts the shared idle plugin', async () => {
     for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
       expect(row(await rows(path), 'telegram').config).not.toHaveProperty('idle')
     }
-    expect(row(await rows('../cordis.patch.yml'), 'telegram-idle').name).toBe('dsh-telegram/idle')
+    const bundle = await rows('../cordis.patch.yml')
+    expect(row(bundle, 'chat-idle').name).toBe('dsh-chat/idle')
+    const names = bundle.flatMap(r => r.insert ?? []).map(r => r.name)
+    expect(names).not.toContain('dsh-telegram/idle')
+    expect(names).not.toContain('dsh-telegram/schedule')
   })
 
   it('gives the agent a clock in the local zone, since Telegram sends no browser zone', async () => {
@@ -61,19 +65,19 @@ describe('profile patch', () => {
   })
 
   it('mounts the reminder plugin with the local zone', async () => {
-    const reminders = row(await rows('../cordis.patch.yml'), 'telegram-schedule')
-    expect(reminders.name).toBe('dsh-telegram/schedule')
+    const reminders = row(await rows('../cordis.patch.yml'), 'chat-schedule')
+    expect(reminders.name).toBe('dsh-chat/schedule')
     expect(reminders.config).toEqual({ timeZone: 'Asia/Ho_Chi_Minh', maxPerChat: 20 })
   })
 
   it('keeps both idle rows valid for the burst schema', async () => {
-    const { Config } = await import('../src/idle/index.ts')
+    const { Config } = await import('dsh-chat/idle')
     const resolve = (value: any): any => (value !== null && typeof value === 'object' && 'js' in value
       ? evalJs(value, { TELEGRAM_IDLE_ENABLED: 'true', TELEGRAM_IDLE_CHATS: '-100' })
       : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolve(v)])) : value)
     for (const path of ['../../../profile/telegram/cordis.patch.yml', '../cordis.patch.yml']) {
       const config = Config(resolve(telegramIdle(await rows(path))))
-      expect(config).toMatchObject({ enabled: true, chatIds: [-100], hotWindowMinutes: 5, burstGapMinutes: 15, maxPerBurst: 4, slotGapMinutes: 10 })
+      expect(config).toMatchObject({ enabled: true, chatKeys: ['telegram:-100'], hotWindowMinutes: 5, burstGapMinutes: 15, maxPerBurst: 4, slotGapMinutes: 10 })
       expect(config).not.toHaveProperty('checkIntervalMinutes')
     }
   })
