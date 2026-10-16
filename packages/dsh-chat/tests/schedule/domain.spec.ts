@@ -87,7 +87,7 @@ describe('afterDelivery', () => {
 describe('rendering', () => {
   it('shows a view with mode and creator', () => {
     expect(reminderView(reminder({ mode: 'agent' }, { daily: { time: '07:00:00' } }))).toMatchObject({
-      id: 'r1', kind: 'daily', mode: 'agent', title: 'Title', prompt: 'Do it', creator: { id: 'telegram:7', name: '@ann' }, time: '07:00:00.000',
+      id: 'r1', kind: 'daily', mode: 'agent', title: 'Title', prompt: 'Do it', creator: { id: '7', name: '@ann' }, time: '07:00:00.000',
     })
   })
   it('names a sender by username, else name', () => {

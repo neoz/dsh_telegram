@@ -3,7 +3,7 @@ import {
   createWeeklyScheduleRecord, isRecurringScheduleRecord, MAX_TITLE_LENGTH, resolveRecurringOccurrence, ScheduleId, ScheduleInputError,
   scheduleView, type ScheduleRecord,
 } from '@deepseek-ai/dsh-schedule'
-import type { ChatKey } from '../keys.ts'
+import { splitKey, type ChatKey } from '../keys.ts'
 import type { ChatSender } from '../sessions/agents.ts'
 
 export type ReminderMode = 'message' | 'agent'
@@ -99,7 +99,8 @@ export function afterDelivery(reminder: Reminder, now: number): Reminder | undef
 /** dsh-schedule's view without its Host-only `state` and `deliveryMode` (so the clock it samples does not matter), plus mode and creator. */
 export function reminderView(reminder: Reminder): Record<string, unknown> {
   const { state: _state, deliveryMode: _deliveryMode, ...view } = scheduleView(reminder.record, Date.now()) as unknown as Record<string, unknown>
-  return { ...view, mode: reminder.mode, creator: reminder.creator }
+  // The model sees the creator's id on its own platform, as before reminders moved to dsh-chat.
+  return { ...view, mode: reminder.mode, creator: { id: splitKey(reminder.creator.id).id, name: reminder.creator.name } }
 }
 
 export function displayName(sender: ChatSender): string {

@@ -56,7 +56,8 @@ describe('schedule tools', () => {
   it('creates a message reminder in the default zone and lists it for the chat only', async () => {
     const { create, list } = tools()
     const created = await call(create, { title: 'Standup', prompt: 'Join the call', daily: { time: '07:00:00' } })
-    expect(created).toMatchObject({ id: 'r1', kind: 'daily', mode: 'message', scheduledAt: '2026-10-05T00:00:00.000Z', creator: { id: 'telegram:7', name: '@ann' } })
+    expect(created).toMatchObject({ id: 'r1', kind: 'daily', mode: 'message', scheduledAt: '2026-10-05T00:00:00.000Z', creator: { id: '7', name: '@ann' } })
+    expect(book.all()[0]!.creator.id).toBe('telegram:7')
     expect(book.all()[0]).toMatchObject({ chatKey: 'telegram:5', isGroup: false })
     expect(changes).toBe(1)
     expect((await call(list, {})).map((r: { id: string }) => r.id)).toEqual(['r1'])
