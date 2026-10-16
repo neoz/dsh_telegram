@@ -1,4 +1,4 @@
-import type { ChatChannel, TurnReport, TurnSink } from 'dsh-chat'
+import type { ChatChannel, Delivered, TurnReport, TurnSink } from 'dsh-chat'
 import type { Config } from './config.ts'
 import { splitMessage } from './render.ts'
 import { ZaloApiError, type ZaloApi } from './zalo-api.ts'
@@ -61,7 +61,9 @@ async function notice(deps: ZaloChannelDeps, chatId: string, text: string): Prom
 /** Emoji compare without the U+FE0F variation selector, as idle already normalizes them. */
 const plain = (emoji: string) => emoji.replaceAll('\u{FE0F}', '')
 
-const withId = (outcome: TurnOutcome, id: string | undefined) => ({ outcome, ...(id === undefined ? {} : { messageId: id }) })
+/** Zalo may answer without a message id; an empty id is no id, so nothing is logged under it. */
+const withId = (outcome: TurnOutcome, id: string | undefined) => ({ outcome, ...(id === undefined || id === '' ? {} : { messageId: id }) })
+const posted = (as: Delivered['as'], id: string, text: string): Delivered => (id === '' ? { as } : { as, messageId: id, text })
 
 async function deliver(deps: ZaloChannelDeps, chatId: string, report: TurnReport): Promise<{ outcome: TurnOutcome; messageId?: string }> {
   if (report.kind === 'timeout') return withId('timeout', await notice(deps, chatId, `The reply timed out after ${Math.round(report.timeoutMs / 1000)}s and was stopped.`))
@@ -72,7 +74,7 @@ async function deliver(deps: ZaloChannelDeps, chatId: string, report: TurnReport
   for (const part of splitMessage(report.text, deps.config.messageSize)) {
     const id = await sendPart(deps.api, chatId, part, deps.log)
     if (id === undefined) return withId('undelivered', lastId)
-    lastId = id
+    if (id !== '') lastId = id
   }
   return withId('sent', lastId)
 }
@@ -95,7 +97,7 @@ export function createZaloChannel(deps: ZaloChannelDeps): ChatChannel {
     },
     async send(chatId, text, opts = {}) {
       const sent = await deps.api.sendMessage(chatId, text)
-      return { as: opts.replyTo === undefined ? 'native' : 'fallback', messageId: sent.messageId, text }
+      return posted(opts.replyTo === undefined ? 'native' : 'fallback', sent.messageId, text)
     },
     // Zalo has no reactions: a mapped sticker stands in, any other emoji is posted as text.
     async react(chatId, _messageId, emoji) {
@@ -103,10 +105,10 @@ export function createZaloChannel(deps: ZaloChannelDeps): ChatChannel {
       const sticker = Object.entries(deps.config.stickers).find(([key]) => plain(key) === wanted)?.[1]
       if (sticker === undefined) {
         const sent = await deps.api.sendMessage(chatId, wanted)
-        return { as: 'fallback', messageId: sent.messageId, text: wanted }
+        return posted('fallback', sent.messageId, wanted)
       }
       const sent = await deps.api.sendSticker(chatId, sticker)
-      return { as: 'fallback', messageId: sent.messageId, text: `[sticker ${wanted}]` }
+      return posted('fallback', sent.messageId, `[sticker ${wanted}]`)
     },
   }
 }

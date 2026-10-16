@@ -97,6 +97,17 @@ describe('Zalo send and react', () => {
     expect(api.callsTo('sendSticker')[0]!.args).toEqual(['c1', 'heart1'])
   })
 
+  it('reports no message id when Zalo answers without one, so nothing is logged under an empty id', async () => {
+    const api = new FakeZaloApi()
+    api.sendMessage = async () => ({ messageId: '' })
+    api.sendSticker = async () => ({ messageId: '' })
+    const ch = channel(api, { stickers: { '\u{1F44D}': 'like1' } })
+    expect(await ch.send('c1', 'hi')).toEqual({ as: 'native' })
+    expect(await ch.react('c1', 'm1', '\u{1F44D}')).toEqual({ as: 'fallback' })
+    expect(await ch.react('c1', 'm1', '\u{1F525}')).toEqual({ as: 'fallback' })
+    expect(await deliverOnce(api, reply('ok'))).toEqual({ outcome: 'sent' })
+  })
+
   it('sends an emoji without a sticker as text', async () => {
     const api = new FakeZaloApi()
     expect(await channel(api).react('c1', 'm1', '\u{1F525}')).toEqual({ as: 'fallback', messageId: 'm100', text: '\u{1F525}' })
