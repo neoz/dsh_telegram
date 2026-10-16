@@ -50,7 +50,7 @@ export function apply(ctx: Context, config: ModelRoute): void {
     return () => {
       stopped = true
       revoke?.()
-      void agents.disposeAll()
+      return agents.disposeAll()
     }
   }, 'dsh-chat: chatAgents')
 }

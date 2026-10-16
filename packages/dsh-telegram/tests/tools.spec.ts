@@ -13,7 +13,7 @@ afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 const exec = { callId: 'c', name: '', arguments: {}, signal: new AbortController().signal, deferContext() {}, concludeTurn() {} } as never
 
 function deps() {
-  return { api, chatId: 5, workspaceDir: dir, maxUploadBytes: 100 }
+  return { api: () => api, chatId: 5, workspaceDir: dir, maxUploadBytes: 100 }
 }
 
 describe('telegram_send_file', () => {
@@ -36,5 +36,24 @@ describe('telegram_send_file', () => {
     await expect(tool.execute({ path: '../dsh-telegram-secret' }, exec)).rejects.toThrow(/outside/)
     await expect(tool.execute({ path: 'big.bin' }, exec)).rejects.toThrow(/exceeds/)
     await rm(join(tmpdir(), 'dsh-telegram-secret'), { force: true })
+  })
+})
+
+describe('telegram_send_file across bot restarts', () => {
+  it('sends through the bot running at call time', async () => {
+    await writeFile(join(dir, 'notes.txt'), 'txt')
+    let current: FakeTelegramApi | undefined = api
+    const tool = createSendFileTool({ ...deps(), api: () => current })
+    const restarted = new FakeTelegramApi()
+    current = restarted
+    await tool.execute({ path: 'notes.txt' }, exec)
+    expect(api.callsTo('sendDocument')).toHaveLength(0)
+    expect(restarted.callsTo('sendDocument')).toHaveLength(1)
+  })
+
+  it('fails clearly while the bot is not running', async () => {
+    await writeFile(join(dir, 'notes.txt'), 'txt')
+    const tool = createSendFileTool({ ...deps(), api: () => undefined })
+    await expect(tool.execute({ path: 'notes.txt' }, exec)).rejects.toThrow('the Telegram bot is not running; try again shortly')
   })
 })

@@ -5,7 +5,8 @@ import { outboundKind, resolveInsideWorkspace } from './media.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
 export interface ToolDeps {
-  api: TelegramApi
+  /** The bot running now; undefined while it restarts. Read per call, so an agent outlives a bot restart. */
+  api: () => TelegramApi | undefined
   chatId: number
   workspaceDir: string
   maxUploadBytes: number
@@ -29,11 +30,13 @@ export function createSendFileTool(deps: ToolDeps): ToolDefinition {
       if (size > deps.maxUploadBytes) {
         throw new Error(`file size ${size} bytes exceeds the upload limit of ${deps.maxUploadBytes} bytes`)
       }
+      const api = deps.api()
+      if (api === undefined) throw new Error('the Telegram bot is not running; try again shortly')
       const data = await readFile(path)
       const filename = basename(path)
       const options = { filename, ...(args.caption === undefined ? {} : { caption: args.caption }) }
-      if (outboundKind(path) === 'photo') await deps.api.sendPhoto(deps.chatId, data, options)
-      else await deps.api.sendDocument(deps.chatId, data, options)
+      if (outboundKind(path) === 'photo') await api.sendPhoto(deps.chatId, data, options)
+      else await api.sendDocument(deps.chatId, data, options)
       return `Sent ${filename}`
     },
   })

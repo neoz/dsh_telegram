@@ -43,9 +43,20 @@ describe('chat_history', () => {
 })
 
 describe('dsh-chat/history', () => {
+  it('waits for chatAgents too, so its listener exists before the first chat agent', async () => {
+    const root = new Context()
+    root.provide('chatLog', chatLog)
+    const fiber = root.plugin(historyPlugin)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(fiber.state).not.toBe(2)
+    root.provide('chatAgents', {} as never)
+    await vi.waitFor(() => expect(fiber.state).toBe(2))
+  })
+
   it('registers chat_history on every chat agent once chatLog is up', async () => {
     const root = new Context()
     root.provide('chatLog', chatLog)
+    root.provide('chatAgents', {} as never)
     root.plugin(historyPlugin)
     const registered: string[] = []
     const agentCtx = { tools: { register: (t: { name: string }) => { registered.push(t.name); return () => {} } }, effect: (fn: () => () => void) => { fn() } }

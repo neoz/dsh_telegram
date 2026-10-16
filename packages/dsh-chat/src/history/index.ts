@@ -35,7 +35,7 @@ export function createChatHistoryTool(deps: { chatLog: ChatLog; key: ChatKey }):
 
 /** Cordis plugin name. */
 export const name = 'dsh-chat-history'
-export const inject = ['chatLog']
+export const inject = ['chatLog', 'chatAgents']
 
 export function apply(ctx: Context): void {
   ctx.on('chat/agent', (agentCtx, key) => {

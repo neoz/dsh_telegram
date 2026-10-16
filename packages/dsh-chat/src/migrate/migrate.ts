@@ -66,6 +66,9 @@ export async function migrate(options: MigrateOptions): Promise<'current' | 'mig
   const { dataDir, workspaceRoot, legacyChannel: channel } = options
   if (await exists(join(dataDir, MARKER))) return 'current'
   if (channel !== undefined) {
+    // Legacy files carry no channel, so a volume holding another channel's session map must not be moved under this one.
+    const other = (await names(dataDir)).map(name => /^([a-z]+)-sessions\.json$/.exec(name)?.[1]).find(found => found !== undefined && found !== channel)
+    if (other !== undefined) throw new Error(`dsh-chat: ${dataDir} holds legacy ${other} data; a volume can be migrated for one channel only, set legacyChannel to match it`)
     const target = join(dataDir, channel)
     for (const name of await names(join(dataDir, 'chatlog'))) await move(join(dataDir, 'chatlog', name), join(target, 'chatlog', name))
     if (channel === 'telegram') await stringifyLogIds(join(target, 'chatlog'))

@@ -62,6 +62,15 @@ describe('migrate', () => {
     expect(existsSync(join(data, 'zalo-sessions.json'))).toBe(false)
   })
 
+  it('refuses a volume that holds another channel\'s legacy data, moving nothing', async () => {
+    await legacyTelegram()
+    await put(join(data, 'zalo-sessions.json'), '{}')
+    await expect(migrate({ dataDir: data, workspaceRoot: ws, legacyChannel: 'telegram' }))
+      .rejects.toThrow(`dsh-chat: ${data} holds legacy zalo data; a volume can be migrated for one channel only, set legacyChannel to match it`)
+    expect(existsSync(join(data, 'chatlog', '-100.jsonl'))).toBe(true)
+    expect(existsSync(join(data, MARKER))).toBe(false)
+  })
+
   it('does nothing once the marker exists', async () => {
     await legacyTelegram()
     await put(join(data, MARKER), 'done')

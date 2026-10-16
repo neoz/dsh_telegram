@@ -165,7 +165,7 @@ describe('toolStatus', () => {
   }
   it.each([
     ['web_search', 'W'], ['web_fetch', 'W'],
-    ['read', 'R'], ['read_image', 'R'], ['glob', 'R'], ['grep', 'R'], ['telegram_chat_history', 'R'],
+    ['read', 'R'], ['read_image', 'R'], ['glob', 'R'], ['grep', 'R'], ['chat_history', 'R'],
     ['write', 'E'], ['edit', 'E'], ['str_replace_editor', 'E'],
     ['bash', 'C'], ['pwsh', 'C'],
     ['telegram_send_file', 'S'],

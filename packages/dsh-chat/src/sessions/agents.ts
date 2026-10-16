@@ -169,9 +169,16 @@ export class ChatAgents {
     return true
   }
 
+  /** Running turns are cancelled and allowed to finish (and deliver "Stopped.") before their agents go away. */
   async disposeAll(): Promise<void> {
     const handles = [...this.handles.values()]
     this.handles.clear()
-    await Promise.allSettled(handles.map(handle => handle.dispose()))
+    await Promise.allSettled(handles.map(async (handle) => {
+      if (handle.agent.status === 'running') {
+        handle.agent.cancel({ kind: 'user' })
+        await handle.agent.whenIdle()
+      }
+      await handle.dispose()
+    }))
   }
 }

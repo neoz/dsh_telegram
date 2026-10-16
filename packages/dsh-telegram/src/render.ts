@@ -169,7 +169,7 @@ const TOOL_GROUPS: Record<string, keyof Omit<StatusLabels, 'thinking' | 'other'>
   read_image: 'read',
   glob: 'read',
   grep: 'read',
-  telegram_chat_history: 'read',
+  chat_history: 'read',
   write: 'write',
   edit: 'write',
   str_replace_editor: 'write',

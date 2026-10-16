@@ -149,7 +149,7 @@ export function apply(ctx: Context, config: Config): void {
       revoke = undefined
       // Queued messages must not start turns on a bot that is going away.
       dispatcher.close()
-      void poller.stop()
+      return poller.stop()
     }
   }, 'dsh-zalo: bot runner')
 }

@@ -29,7 +29,7 @@ export const name = 'dsh-telegram'
 /** Services required before the bot starts; the stores come from the dsh-chat plugins. */
 export const inject = ['attachments', 'loader', 'chatData', 'chatLog', 'chatMemory', 'chatAgents']
 
-interface Started { polling: Polling; api: TelegramApi; maxUploadBytes: number; service: TelegramService }
+interface Started { polling: Polling; api: TelegramApi; service: TelegramService }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -57,7 +57,6 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   const chatLog = ctx.chatLog
   const agents = ctx.chatAgents
   const feed: SessionEventFeed = listener => ctx.on('session/event', (session, event) => listener(String(session.id), event))
-  const maxUploadBytes = config.retry.maxUploadMb * 1024 * 1024
 
   const dispatcher = createDispatcher({
     api,
@@ -80,7 +79,6 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   return {
     polling,
     api,
-    maxUploadBytes,
     service: {
       api,
       chatLog,
@@ -168,8 +166,8 @@ export function apply(ctx: Context, config: Config): void {
   let stopped = false
   ctx.on('chat/agent', (agentCtx, key) => {
     const id = idIn('telegram', key)
-    if (id === undefined || started === undefined) return
-    const tool = createSendFileTool({ api: started.api, chatId: Number(id), workspaceDir: ctx.chatAgents.workspaceFor(key), maxUploadBytes: started.maxUploadBytes })
+    if (id === undefined) return
+    const tool = createSendFileTool({ api: () => started?.api, chatId: Number(id), workspaceDir: ctx.chatAgents.workspaceFor(key), maxUploadBytes: config.retry.maxUploadMb * 1024 * 1024 })
     agentCtx.effect(() => agentCtx.tools.register(tool), 'dsh-telegram: telegram_send_file')
   })
   // Idle engagement listens to telegram/message with numeric chat ids until it moves to dsh-chat.
@@ -198,7 +196,7 @@ export function apply(ctx: Context, config: Config): void {
       // Dependants stop first, while the bot can still serve their last calls.
       revoke?.()
       revoke = undefined
-      void polling.stop()
+      return polling.stop()
     }
   }, 'dsh-telegram: bot runner')
 }

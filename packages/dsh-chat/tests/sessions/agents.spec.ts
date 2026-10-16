@@ -200,3 +200,21 @@ describe('ChatAgents across channels', () => {
     expect(agents.selection).toEqual({ provider: 'deepseek-official', model: 'm' })
   })
 })
+
+describe('ChatAgents shutdown', () => {
+  it('lets a running turn wind down before disposing its agent', async () => {
+    const { agents, live, disposed } = await build()
+    const { agent } = await agents.resolve('telegram:1')
+    const fake = live.get(String(agent.id))!
+    fake.status = 'running'
+    let finish!: () => void
+    fake.whenIdle = () => new Promise<void>((resolve) => { finish = resolve })
+    const done = agents.disposeAll()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(fake.cancel).toHaveBeenCalledWith({ kind: 'user' })
+    expect(disposed).toEqual([])
+    finish()
+    await done
+    expect(disposed).toEqual([fake.id])
+  })
+})
