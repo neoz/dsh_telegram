@@ -67,6 +67,7 @@
     "./retention": { "types": "./lib/retention/index.d.ts", "default": "./lib/retention/index.js" },
     "./idle": { "types": "./lib/idle/index.d.ts", "default": "./lib/idle/index.js" },
     "./schedule": { "types": "./lib/schedule/index.d.ts", "default": "./lib/schedule/index.js" },
+    "./skills": { "types": "./lib/skills/index.d.ts", "default": "./lib/skills/index.js" },
     "./package.json": "./package.json"
   }
 }
