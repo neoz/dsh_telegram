@@ -1,3 +1,4 @@
+import { chatKey } from 'dsh-chat'
 import { afterDelivery, agentPrompt, dueReminders, nextDueAt, reminderMessage, type Reminder } from './domain.ts'
 import type { ReminderStore } from './store.ts'
 import type { TelegramService } from '../service.ts'
@@ -61,8 +62,8 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
     } else if (reminder.mode === 'message') {
       const text = reminderMessage(reminder)
       const sent = await telegram.api.sendMessage(chatId, text)
-      await telegram.chatLog.append(chatId, {
-        ts: new Date(now()).toISOString(), message_id: sent.messageId, user_id: telegram.bot.id, name: telegram.bot.username, text, bot: true,
+      await telegram.chatLog.append(chatKey('telegram', chatId), {
+        ts: new Date(now()).toISOString(), message_id: String(sent.messageId), user_id: String(telegram.bot.id), name: telegram.bot.username, text, bot: true,
       })
     } else {
       telegram.prompt(chatId, { text: agentPrompt(reminder), sender: { id: reminder.creator.id, is_bot: false, first_name: reminder.creator.name } })

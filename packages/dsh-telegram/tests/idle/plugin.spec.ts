@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatLog } from '../../src/chatlog.ts'
+import { chatKey, ChatLog, idIn } from 'dsh-chat'
 import * as idlePlugin from '../../src/idle/index.ts'
 import { assertIdleConfig, Config } from '../../src/idle/index.ts'
 import type { TelegramService } from '../../src/service.ts'
@@ -70,7 +70,7 @@ describe('idle plugin', () => {
   async function burst(): Promise<void> {
     const now = Date.now()
     for (let i = 0; i < 5; i++) {
-      await chatLog.append(A, { ts: new Date(now - (5 - i) * 1000).toISOString(), message_id: 10 + i, user_id: i % 2 === 0 ? 7 : 8, name: 'U', text: 'hi' })
+      await chatLog.append(chatKey('telegram', A), { ts: new Date(now - (5 - i) * 1000).toISOString(), message_id: String(10 + i), user_id: i % 2 === 0 ? '7' : '8', name: 'U', text: 'hi' })
     }
   }
 
@@ -79,7 +79,7 @@ describe('idle plugin', () => {
     queued = []
     root = new Context()
     // The core wires the chat log to telegram/message the same way.
-    chatLog = new ChatLog(join(dir, 'log'), (chatId, entry) => root.emit('telegram/message', chatId, entry))
+    chatLog = new ChatLog(join(dir, 'log'), (key, entry) => root.emit('telegram/message', Number(idIn('telegram', key)), entry))
     root.provide('llm', { async *stream(): AsyncIterable<StreamChunk> { yield { type: 'finish', reason: { kind: 'stop' } } as never } })
     root.provide('attachments', { saveImages: async () => [] } as never)
   })
@@ -140,7 +140,7 @@ describe('idle plugin', () => {
     })
     const now = Date.now()
     for (let i = 0; i < 5; i++) {
-      await chatLog.append(A, { ts: new Date(now + i).toISOString(), message_id: 50 + i, user_id: i % 2 === 0 ? 7 : 8, name: 'U', text: 'again' })
+      await chatLog.append(chatKey('telegram', A), { ts: new Date(now + i).toISOString(), message_id: String(50 + i), user_id: i % 2 === 0 ? '7' : '8', name: 'U', text: 'again' })
     }
     expect(queued).toEqual([A])
   })

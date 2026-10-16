@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
-import type { ChatLogEntry } from './chatlog.ts'
+import type { ChatLogEntry } from 'dsh-chat'
 import { sanitizeFilename } from './media.ts'
 import type { TelegramApi } from './telegram-api.ts'
 
@@ -122,12 +122,12 @@ export function logEntryFor(message: TelegramMessage, savedFiles: string[] = [])
   const text = bodyText(message)
   return {
     ts: new Date(message.date * 1000).toISOString(),
-    message_id: message.message_id,
-    user_id: sender.id,
+    message_id: String(message.message_id),
+    user_id: String(sender.id),
     ...(sender.username === undefined ? {} : { username: sender.username }),
     name: sender.first_name,
     text: text !== '' ? text : message.sticker !== undefined ? stickerMarker(message.sticker) : message.photo !== undefined ? '[photo]' : '',
-    ...(message.reply_to_message === undefined ? {} : { reply_to: message.reply_to_message.message_id }),
+    ...(message.reply_to_message === undefined ? {} : { reply_to: String(message.reply_to_message.message_id) }),
     ...(savedFiles.length === 0 ? {} : { media: savedFiles }),
   }
 }

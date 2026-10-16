@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatLog } from '../../src/chatlog.ts'
+import { ChatLog } from 'dsh-chat'
 import { buildRecord, type Reminder } from '../../src/schedule/domain.ts'
 import { startScheduler } from '../../src/schedule/delivery.ts'
 import { ReminderStore } from '../../src/schedule/store.ts'
@@ -53,7 +53,7 @@ describe('startScheduler', () => {
     now = NOW + 60_000
     await s.tick()
     expect(api.callsTo('sendMessage')[0]!.args.slice(0, 2)).toEqual([5, '\u{23F0} Ta\npa'])
-    expect((await chatLog.readAll(5))[0]).toMatchObject({ bot: true, text: '\u{23F0} Ta\npa', user_id: 1 })
+    expect((await chatLog.readAll('telegram:5'))[0]).toMatchObject({ bot: true, text: '\u{23F0} Ta\npa', user_id: '1' })
     expect(store.all()).toEqual([])
     expect(infos).toContain('dsh-telegram: chat 5 reminder a -> message')
     s.stop()

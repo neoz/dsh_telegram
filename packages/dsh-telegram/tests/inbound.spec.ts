@@ -61,7 +61,7 @@ describe('parseInbound', () => {
     const got = await parseInbound(msg({ text: 'hello' }), options())
     expect(got.text).toBe('hello')
     expect(got.isGroup).toBe(false)
-    expect(got.logEntry).toMatchObject({ message_id: 10, user_id: 7, username: 'ann', name: 'Ann', text: 'hello' })
+    expect(got.logEntry).toMatchObject({ message_id: '10', user_id: '7', username: 'ann', name: 'Ann', text: 'hello' })
   })
 
   it('prefixes the sender label and strips the mention in groups', async () => {
@@ -115,7 +115,7 @@ describe('parseInbound', () => {
     const got = await parseInbound(msg({ text: 'reply', reply_to_message: quoted }), options())
     expect(got.text).toBe('> id:9 (Bob): first line\n> second\n> [image]\n\nreply')
     expect(got.images).toHaveLength(1)
-    expect(got.logEntry.reply_to).toBe(3)
+    expect(got.logEntry.reply_to).toBe('3')
 
     const botQuoted: TelegramMessage = { ...quoted, from: { id: 1, is_bot: true, first_name: 'dsh' } }
     const got2 = await parseInbound(msg({ text: 'again', reply_to_message: botQuoted }), options())

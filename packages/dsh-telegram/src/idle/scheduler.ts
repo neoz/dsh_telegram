@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import type { ImageStore } from '../bot.ts'
-import type { ChatLog, ChatLogEntry } from '../chatlog.ts'
+import { chatKey, type ChatLog, type ChatLogEntry } from 'dsh-chat'
 import type { TelegramApi } from '../telegram-api.ts'
 import { dayKey, emptyChatState, evaluate, observe, type ChatIdleState, type CheckVerdict, type Evaluation } from './burst.ts'
 import { decide, idleSystemPrompt, type IdleAction, type IdleLlm, type IdlePhoto } from './engage.ts'
@@ -11,7 +11,7 @@ import type { IdleConfig } from './index.ts'
 export type IdleEvent = { ts: string } & (
   | { event: 'start'; chatIds: number[]; config: Omit<IdleConfig, 'persona' | 'chatIds'> }
   | { event: 'check'; chatId: number; verdict: CheckVerdict; fresh?: number; speakers?: number; pickable?: number; burstSince?: string; slotsUsed?: number }
-  | { event: 'decision'; chatId: number; action: IdleAction['kind'] | 'cancelled' | 'error'; messageId?: number; emoji?: string; text?: string; error?: string }
+  | { event: 'decision'; chatId: number; action: IdleAction['kind'] | 'cancelled' | 'error'; messageId?: string; emoji?: string; text?: string; error?: string }
 )
 type IdleEventBody = IdleEvent extends infer E ? E extends IdleEvent ? Omit<E, 'ts'> : never : never
 
@@ -147,15 +147,15 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     try {
       if (action.kind === 'react') {
         state.reacted = [...state.reacted, action.messageId].slice(-MAX_REACTED)
-        await deps.api.setReaction(chatId, action.messageId, action.emoji)
+        await deps.api.setReaction(chatId, Number(action.messageId), action.emoji)
         record({ event: 'decision', chatId, action: 'react', messageId: action.messageId, ...detail })
         return
       }
-      const sent = await deps.api.sendMessage(chatId, action.text, { replyTo: { messageId: action.messageId } })
-      await deps.chatLog.append(chatId, {
+      const sent = await deps.api.sendMessage(chatId, action.text, { replyTo: { messageId: Number(action.messageId) } })
+      await deps.chatLog.append(chatKey('telegram', chatId), {
         ts: new Date(at).toISOString(),
-        message_id: sent.messageId,
-        user_id: deps.botId,
+        message_id: String(sent.messageId),
+        user_id: String(deps.botId),
         name: deps.botUsername,
         text: action.text,
         reply_to: action.messageId,
@@ -197,7 +197,7 @@ export function startIdle(deps: IdleDeps): IdleHandle {
     const held = new Set<string>()
     try {
       const fresh = emptyChatState()
-      for (const entry of await deps.chatLog.readAll(chatId)) {
+      for (const entry of await deps.chatLog.readAll(chatKey('telegram', chatId))) {
         observe(fresh, entry, config)
         held.add(lineKey(entry))
       }

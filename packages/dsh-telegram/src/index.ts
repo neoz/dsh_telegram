@@ -6,18 +6,18 @@ import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-tools'
 import { autoRetry } from '@grammyjs/auto-retry'
 import { run, type RunnerHandle } from '@grammyjs/runner'
+import { chatKey, idIn } from 'dsh-chat'
+import type {} from 'dsh-chat/log'
+import type {} from 'dsh-chat/memory'
+import type {} from 'dsh-chat/migrate'
+import type {} from 'dsh-chat/sessions'
 import { Bot } from 'grammy'
 import { createDispatcher } from './bot.ts'
-import { ChatLog, type ChatLogEntry } from './chatlog.ts'
 import { assertConfig, Config } from './config.ts'
 import type { TelegramMessage } from './inbound.ts'
-import { MemoryStore } from './memory.ts'
-import { sweepOldFiles } from './retention.ts'
-import type { TelegramService } from './service.ts'
-import { SessionMap } from './session-map.ts'
-import { ChatAgents } from './sessions.ts'
-import { createGrammyApi } from './telegram-api.ts'
-import { registerChatTools } from './tools.ts'
+import { telegramTurn, type TelegramService } from './service.ts'
+import { createGrammyApi, type TelegramApi } from './telegram-api.ts'
+import { createSendFileTool } from './tools.ts'
 import type { SessionEventFeed } from './turn.ts'
 
 export { Config } from './config.ts'
@@ -26,10 +26,10 @@ export type { TelegramService } from './service.ts'
 
 /** Cordis plugin name. */
 export const name = 'dsh-telegram'
-/** Services required before the bot starts. */
-export const inject = ['agents', 'tools', 'attachments', 'loader']
+/** Services required before the bot starts; the stores come from the dsh-chat plugins. */
+export const inject = ['attachments', 'loader', 'chatData', 'chatLog', 'chatMemory', 'chatAgents']
 
-interface Started { polling: Polling; agents: ChatAgents; service: TelegramService }
+interface Started { polling: Polling; api: TelegramApi; maxUploadBytes: number; service: TelegramService }
 
 /** Narrow the Cordis logger to the three methods the modules take. */
 function loggerFor(ctx: Context) {
@@ -54,36 +54,16 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   await bot.init()
   const api = createGrammyApi(bot, config.botToken, config.retry)
 
-  const chatLog = new ChatLog(join(config.dataDir, 'chatlog'), forwardAppends((chatId, entry) => ctx.emit('telegram/message', chatId, entry), log.warn), config.chatLogMaxEntries)
-  const memory = new MemoryStore(join(config.dataDir, 'memory'), config.memory)
-  const map = new SessionMap(join(config.dataDir, 'telegram-sessions.json'))
-  await map.load()
-
+  const chatLog = ctx.chatLog
+  const agents = ctx.chatAgents
   const feed: SessionEventFeed = listener => ctx.on('session/event', (session, event) => listener(String(session.id), event))
   const maxUploadBytes = config.retry.maxUploadMb * 1024 * 1024
-  const agents: ChatAgents = new ChatAgents({
-    agents: ctx.agents,
-    map,
-    workspaceRoot: config.workspaceRoot,
-    selection: {
-      provider: config.provider,
-      model: config.model,
-      ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }),
-    },
-    setup: (agentCtx, _agent, chatId) => {
-      registerChatTools(agentCtx, {
-        api, chatLog, chatId, workspaceDir: agents.workspaceFor(chatId), maxUploadBytes,
-        memory, superAdmins: config.superAdmins, currentTurn: () => agents.turnOf(chatId),
-      })
-    },
-    log,
-  })
 
   const dispatcher = createDispatcher({
     api,
     config,
     chatLog,
-    memory,
+    memory: ctx.chatMemory,
     agents,
     feed,
     attachments: ctx.attachments,
@@ -99,30 +79,24 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   log.info(`dsh-telegram: polling as @${bot.botInfo.username}`)
   return {
     polling,
-    agents,
+    api,
+    maxUploadBytes,
     service: {
       api,
       chatLog,
       queue: dispatcher,
       bot: { id: bot.botInfo.id, username: bot.botInfo.username },
-      selection: { provider: config.provider, model: config.model },
-      dataDir: config.dataDir,
+      selection: agents.selection,
+      dataDir: join(ctx.chatData.dataDir, 'telegram'),
       superAdmins: config.superAdmins,
-      chatOf: agentId => agents.chatOf(agentId),
-      turnOf: chatId => agents.turnOf(chatId),
+      chatOf: (agentId) => {
+        const key = agents.chatOf(agentId)
+        const id = key === undefined ? undefined : idIn('telegram', key)
+        return id === undefined ? undefined : Number(id)
+      },
+      turnOf: chatId => telegramTurn(agents.turnOf(chatKey('telegram', chatId))),
       prompt: (chatId, input) => dispatcher.prompt(chatId, input),
     },
-  }
-}
-
-/** Chat-log listener that forwards lines as telegram/message; Cordis does not isolate listeners, so a throw only warns. */
-export function forwardAppends(emit: (chatId: number, entry: ChatLogEntry) => void, warn: (msg: string) => void): (chatId: number, entry: ChatLogEntry) => void {
-  return (chatId, entry) => {
-    try {
-      emit(chatId, entry)
-    } catch (error) {
-      warn(`dsh-telegram: a telegram/message listener failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
   }
 }
 
@@ -186,33 +160,27 @@ export function retryStart<T>(
 
 const STARTUP_BACKOFF = { startDelayMs: 5_000, maxDelayMs: 300_000 }
 
-const DAY_MS = 86_400_000
-
-/** Sweeps old inbox and outbox files now and then once a day; returns the timer to clear on stop. */
-function startRetention(config: Config, log: ReturnType<typeof loggerFor>): NodeJS.Timeout {
-  const sweep = () => {
-    sweepOldFiles(config.workspaceRoot, config.fileRetentionDays * DAY_MS).catch((error: unknown) => {
-      log.warn(`dsh-telegram: file retention sweep failed: ${error instanceof Error ? error.message : String(error)}`)
-    })
-  }
-  sweep()
-  return setInterval(sweep, DAY_MS).unref()
-}
-
 export function apply(ctx: Context, config: Config): void {
   assertConfig(config)
   const log = loggerFor(ctx)
-  ctx.effect(() => {
-    const timer = startRetention(config, log)
-    return () => clearInterval(timer)
-  }, 'dsh-telegram: file retention')
   let started: Started | undefined
   let revoke: (() => void) | undefined
   let stopped = false
+  ctx.on('chat/agent', (agentCtx, key) => {
+    const id = idIn('telegram', key)
+    if (id === undefined || started === undefined) return
+    const tool = createSendFileTool({ api: started.api, chatId: Number(id), workspaceDir: ctx.chatAgents.workspaceFor(key), maxUploadBytes: started.maxUploadBytes })
+    agentCtx.effect(() => agentCtx.tools.register(tool), 'dsh-telegram: telegram_send_file')
+  })
+  // Idle engagement listens to telegram/message with numeric chat ids until it moves to dsh-chat.
+  ctx.on('chat/message', (key, entry) => {
+    const id = idIn('telegram', key)
+    if (id !== undefined) ctx.emit('telegram/message', Number(id), entry)
+  })
   ctx.effect(() => {
     const cancel = retryStart(() => start(ctx, config), (result) => {
       if (stopped) {
-        void result.polling.stop().then(() => result.agents.disposeAll())
+        void result.polling.stop()
         return
       }
       started = result
@@ -225,12 +193,12 @@ export function apply(ctx: Context, config: Config): void {
       stopped = true
       cancel()
       if (started === undefined) return
-      const { polling, agents } = started
+      const { polling } = started
       started = undefined
       // Dependants stop first, while the bot can still serve their last calls.
       revoke?.()
       revoke = undefined
-      void polling.stop().then(() => agents.disposeAll())
+      void polling.stop()
     }
   }, 'dsh-telegram: bot runner')
 }

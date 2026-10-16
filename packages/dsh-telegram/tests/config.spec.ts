@@ -4,21 +4,16 @@ import { Config, assertConfig } from '../src/config.ts'
 const minimal = {
   botToken: '123:abc',
   allowFrom: ['42'],
-  workspaceRoot: '/workspace',
-  dataDir: '/data',
-  model: 'deepseek-v4-flash',
 }
 
 describe('Config', () => {
   it('fills defaults', () => {
     const config = Config(minimal)
-    expect(config.provider).toBe('deepseek-official')
     expect(config.messageSize).toBe(1024)
     expect(config.recentMessagesLimit).toBe(30)
     expect(config.statusEditIntervalMs).toBe(1000)
     expect(config.turnTimeoutMs).toBe(900_000)
     expect(config.pollRetryMs).toBe(86_400_000)
-    expect(config.fileRetentionDays).toBe(90)
     expect(config.retry).toEqual({ maxAttempts: 4, startDelayMs: 500, maxDelayMs: 8000, maxUploadMb: 20 })
     expect(config.status).toEqual({
       thinking: 'Thinking...',
@@ -45,29 +40,19 @@ describe('Config', () => {
     expect(() => assertConfig(Config({ ...minimal, allowFrom: [] }))).toThrow()
   })
 
-  it('rejects a relative workspace root', () => {
-    expect(() => assertConfig(Config({ ...minimal, workspaceRoot: 'relative' }))).toThrow(/absolute/)
-  })
-
   it('clamps messageSize to its range', () => {
     expect(() => Config({ ...minimal, messageSize: 500 })).toThrow()
     expect(() => Config({ ...minimal, messageSize: 5000 })).toThrow()
   })
 
-  it('defaults superAdmins to nobody and memory caps to 50/50/200', () => {
+  it('defaults superAdmins to nobody and leaves paths, model and memory to dsh-chat', () => {
     const config = Config(minimal)
     expect(config.superAdmins).toEqual([])
-    expect(config.memory).toEqual({ maxEntries: 50, maxGlobalEntries: 50, maxEntryChars: 200 })
+    for (const key of ['workspaceRoot', 'dataDir', 'model', 'provider', 'memory', 'fileRetentionDays', 'chatLogMaxEntries']) expect(config).not.toHaveProperty(key)
     expect(config).not.toHaveProperty('idle')
   })
 
-  it('accepts super admin ids and partial memory overrides', () => {
-    const config = Config({ ...minimal, superAdmins: [42, 7], memory: { maxEntries: 10 } })
-    expect(config.superAdmins).toEqual([42, 7])
-    expect(config.memory).toEqual({ maxEntries: 10, maxGlobalEntries: 50, maxEntryChars: 200 })
-  })
-
-  it('rejects memory caps below one', () => {
-    expect(() => Config({ ...minimal, memory: { maxEntryChars: 0 } })).toThrow()
+  it('accepts super admin ids', () => {
+    expect(Config({ ...minimal, superAdmins: [42, 7] }).superAdmins).toEqual([42, 7])
   })
 })

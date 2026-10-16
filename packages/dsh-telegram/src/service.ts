@@ -1,11 +1,21 @@
 import type { Dispatcher, PromptInput } from './bot.ts'
-import type { ChatLog, ChatLogEntry } from './chatlog.ts'
-import type { TurnContext } from './sessions.ts'
+import type { ChatLog, ChatLogEntry, TurnContext } from 'dsh-chat'
+import type { TelegramUser } from './inbound.ts'
 import type { TelegramApi } from './telegram-api.ts'
+
+/** The running turn in Telegram terms, for the schedule tools. */
+export interface TelegramTurn { sender: TelegramUser; isGroup: boolean }
+
+export function telegramTurn(turn: TurnContext | undefined): TelegramTurn | undefined {
+  if (turn === undefined) return undefined
+  const { id, name, username } = turn.sender
+  return { isGroup: turn.isGroup, sender: { id: Number(id), is_bot: false, first_name: name, ...(username === undefined ? {} : { username }) } }
+}
 
 /** The running bot, shared with extension plugins such as `dsh-telegram/idle`; provided only while the bot polls. */
 export interface TelegramService {
   readonly api: TelegramApi
+  /** The shared dsh-chat log, keyed by `telegram:<chatId>`. */
   readonly chatLog: ChatLog
   /** Per-chat queue shared with message handling; tasks of one chat never overlap. */
   readonly queue: Pick<Dispatcher, 'enqueue' | 'isBusy'>
@@ -17,7 +27,7 @@ export interface TelegramService {
   /** Chat whose live agent has this id; undefined for subagents and unknown sessions. */
   chatOf(agentId: string): number | undefined
   /** Sender of the running turn in that chat. */
-  turnOf(chatId: number): TurnContext | undefined
+  turnOf(chatId: number): TelegramTurn | undefined
   /** Queues an agent turn in the chat as if `sender` had written `text`; the reply quotes no message. */
   prompt(chatId: number, input: PromptInput): void
 }

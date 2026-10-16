@@ -1,5 +1,4 @@
 import z from '@deepseek-ai/schemastery'
-import type { MemoryLimits } from './memory.ts'
 
 /** Bot API retry and upload limits. */
 export interface RetryConfig {
@@ -24,26 +23,16 @@ export interface StatusLabels {
 export interface Config {
   readonly botToken: string
   readonly allowFrom: string[]
-  readonly workspaceRoot: string
-  readonly dataDir: string
-  readonly provider: string
-  readonly model: string
-  readonly reasoningEffort?: string
   readonly messageSize: number
   readonly recentMessagesLimit: number
   readonly statusEditIntervalMs: number
   readonly turnTimeoutMs: number
   /** How long getUpdates keeps retrying after failures before the bot gives up. */
   readonly pollRetryMs: number
-  /** Inbox and outbox files untouched for this many days are deleted. */
-  readonly fileRetentionDays: number
-  /** Each chat log keeps its newest entries up to this many; older ones are dropped. */
-  readonly chatLogMaxEntries: number
   readonly retry: RetryConfig
   readonly status: StatusLabels
   /** Telegram user ids allowed to add, replace, or forget global memory entries. */
   readonly superAdmins: number[]
-  readonly memory: MemoryLimits
 }
 
 const DEFAULT_STATUS: StatusLabels = {
@@ -59,18 +48,11 @@ const DEFAULT_STATUS: StatusLabels = {
 export const Config: z<Config> = z.object({
   botToken: z.string().required(),
   allowFrom: z.array(z.string()).required(),
-  workspaceRoot: z.string().required(),
-  dataDir: z.string().required(),
-  provider: z.string().default('deepseek-official'),
-  model: z.string().required(),
-  reasoningEffort: z.string(),
   messageSize: z.number().min(1000).max(3400).default(1024),
   recentMessagesLimit: z.number().min(0).default(30),
   statusEditIntervalMs: z.number().min(0).default(1000),
   turnTimeoutMs: z.number().min(1).default(900_000),
   pollRetryMs: z.number().min(1).default(86_400_000),
-  fileRetentionDays: z.number().min(1).default(90),
-  chatLogMaxEntries: z.number().min(1).default(15_000),
   retry: z.object({
     maxAttempts: z.number().min(1).default(4),
     startDelayMs: z.number().min(0).default(500),
@@ -87,19 +69,9 @@ export const Config: z<Config> = z.object({
     other: z.string().default(DEFAULT_STATUS.other),
   }).default(DEFAULT_STATUS),
   superAdmins: z.array(z.number()).default([]),
-  memory: z.object({
-    maxEntries: z.number().min(1).default(50),
-    maxGlobalEntries: z.number().min(1).default(50),
-    maxEntryChars: z.number().min(1).default(200),
-  }).default({ maxEntries: 50, maxGlobalEntries: 50, maxEntryChars: 200 }),
 })
 
 /** Checks Schemastery cannot express; throws on the first violation. */
 export function assertConfig(config: Config): void {
   if (config.allowFrom.length === 0) throw new Error('dsh-telegram: allowFrom must list at least one user id or username')
-  for (const key of ['workspaceRoot', 'dataDir'] as const) {
-    if (!config[key].startsWith('/') && !/^[A-Za-z]:[\/]/.test(config[key])) {
-      throw new Error(`dsh-telegram: ${key} must be an absolute path`)
-    }
-  }
 }

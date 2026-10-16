@@ -1,5 +1,5 @@
 import { ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { oneLine, senderLabel, type ChatLogEntry } from '../chatlog.ts'
+import { oneLine, senderLabel, type ChatLogEntry } from 'dsh-chat'
 
 /** Reactions Telegram accepts from bots that suit unprompted engagement. */
 export const IDLE_EMOJI: readonly string[] = [
@@ -8,17 +8,17 @@ export const IDLE_EMOJI: readonly string[] = [
 ]
 
 export type IdleAction =
-  | { kind: 'react'; messageId: number; emoji: string }
-  | { kind: 'reply'; messageId: number; text: string }
+  | { kind: 'react'; messageId: string; emoji: string }
+  | { kind: 'reply'; messageId: string; text: string }
   | { kind: 'skip' }
 
 /** Structural slice of dsh's LlmRuntime the idle decision uses. */
 export interface IdleLlm { stream(options: GenerateOptions): AsyncIterable<StreamChunk> }
 
 /** A photo from the context, admitted as an attachment; `attachment` is the image store's reference. */
-export interface IdlePhoto { messageId: number; attachment: unknown }
+export interface IdlePhoto { messageId: string; attachment: unknown }
 
-export interface DecideOptions { provider: string; model: string; system: string; pickable: ReadonlySet<number>; photos?: readonly IdlePhoto[]; signal?: AbortSignal }
+export interface DecideOptions { provider: string; model: string; system: string; pickable: ReadonlySet<string>; photos?: readonly IdlePhoto[]; signal?: AbortSignal }
 
 const DEFAULT_PERSONA = 'You are a friendly assistant and a member of this Telegram group.'
 const MAX_REPLY_CHARS = 500
@@ -57,13 +57,13 @@ function idleSender(entry: ChatLogEntry): string {
   return entry.bot !== true && entry.username === undefined && entry.name !== '' ? oneLine(entry.name) : senderLabel(entry)
 }
 
-export function idleTranscript(entries: readonly ChatLogEntry[], pickable: ReadonlySet<number>): string {
+export function idleTranscript(entries: readonly ChatLogEntry[], pickable: ReadonlySet<string>): string {
   const lines = entries.map(e => `[${e.message_id}] ${pickable.has(e.message_id) ? '(open) ' : ''}${idleSender(e)}${e.reply_to === undefined ? '' : ` (reply to ${e.reply_to})`}: ${oneLine(e.text)}`)
   return `<group_messages>\n${lines.join('\n')}\n</group_messages>`
 }
 
 /** Validates untrusted model output; throws with the reason when it is not a usable action. */
-export function parseDecision(raw: string, entries: readonly ChatLogEntry[], pickable: ReadonlySet<number>): IdleAction {
+export function parseDecision(raw: string, entries: readonly ChatLogEntry[], pickable: ReadonlySet<string>): IdleAction {
   // Models wrap the object in prose or a code fence; take the outermost braces.
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
@@ -78,7 +78,7 @@ export function parseDecision(raw: string, entries: readonly ChatLogEntry[], pic
   const { action, message_id: messageId, emoji, text } = data as Record<string, unknown>
   if (action === 'skip') return { kind: 'skip' }
   if (action !== 'react' && action !== 'reply') throw new Error(`unknown action ${String(action)}`)
-  const target = entries.find(e => e.message_id === messageId)
+  const target = typeof messageId === 'number' || typeof messageId === 'string' ? entries.find(e => e.message_id === String(messageId)) : undefined
   if (target === undefined || target.bot === true || !pickable.has(target.message_id)) {
     throw new Error(`message_id ${String(messageId)} is not a message the bot may pick`)
   }

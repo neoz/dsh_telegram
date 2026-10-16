@@ -1,4 +1,4 @@
-import type { ChatLogEntry } from '../chatlog.ts'
+import type { ChatLogEntry } from 'dsh-chat'
 import type { IdleConfig } from './index.ts'
 
 const MINUTE_MS = 60_000
@@ -21,12 +21,12 @@ export interface ChatIdleState {
   day: string
   count: number
   /** Newest messages idle reacted to: reactions are not logged, and a second one would replace the first. */
-  reacted: number[]
+  reacted: string[]
   /** Last check verdict recorded in this burst, so repeats are not logged again. */
   lastVerdict: CheckVerdict | undefined
 }
 
-export interface Evaluation { verdict: CheckVerdict; fresh: number; speakers: number; pickable: ReadonlySet<number> }
+export interface Evaluation { verdict: CheckVerdict; fresh: number; speakers: number; pickable: ReadonlySet<string> }
 
 export function emptyChatState(): ChatIdleState {
   return { recent: [], burst: { since: 0, lastHumanAt: 0, slotsUsed: 0, lastSlotAt: 0 }, lastTurnAt: 0, day: '', count: 0, reacted: [], lastVerdict: undefined }
@@ -46,7 +46,7 @@ function inQuietHours(hour: number, quiet: IdleConfig['quietHours']): boolean {
 }
 
 /** Messages that got a turn or a bot reply; the bot's ACK reaction sits on them. */
-export function answeredIds(entries: readonly ChatLogEntry[]): Set<number> {
+export function answeredIds(entries: readonly ChatLogEntry[]): Set<string> {
   return new Set(entries.flatMap((e) => {
     if (e.handled === true) return [e.message_id]
     return e.bot === true && e.reply_to !== undefined ? [e.reply_to] : []

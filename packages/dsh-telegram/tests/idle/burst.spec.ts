@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ChatLogEntry } from '../../src/chatlog.ts'
+import type { ChatLogEntry } from 'dsh-chat'
 import { answeredIds, dayKey, emptyChatState, evaluate, hourIn, observe, type ChatIdleState } from '../../src/idle/burst.ts'
 import { Config, type IdleConfig } from '../../src/idle/index.ts'
 

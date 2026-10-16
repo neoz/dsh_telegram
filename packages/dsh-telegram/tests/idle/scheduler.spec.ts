@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDispatcher } from '../../src/bot.ts'
-import { ChatLog, type ChatLogEntry } from '../../src/chatlog.ts'
+import { chatKey, ChatLog, type ChatLogEntry } from 'dsh-chat'
 import { Config } from '../../src/idle/index.ts'
 import { startIdle, type IdleDeps, type IdleEvent, type IdleHandle } from '../../src/idle/scheduler.ts'
 import { FakeTelegramApi } from '../helpers/fake-api.ts'
@@ -15,7 +15,7 @@ const CHAT = -5
 const base = Config({ enabled: true, chatIds: [CHAT], idleMinutes: 10, minNewMessages: 5, chance: 1 })
 
 function human(id: number, minutesAgo: number, user = id % 2 === 0 ? 8 : 7): ChatLogEntry {
-  return { ts: new Date(NOW - minutesAgo * MIN).toISOString(), message_id: id, user_id: user, username: `u${user}`, name: `U${user}`, text: `m${id}` }
+  return { ts: new Date(NOW - minutesAgo * MIN).toISOString(), message_id: String(id), user_id: String(user), username: `u${user}`, name: `U${user}`, text: `m${id}` }
 }
 function fakeLlm(answer: string) {
   const calls: GenerateOptions[] = []
@@ -61,7 +61,7 @@ function start(answer = '{"action":"reply","message_id":5,"text":"hehe"}', extra
 }
 /** Writes a line to the chat log and feeds it to idle, as the core's telegram/message does. */
 async function say(idle: IdleHandle, entry: ChatLogEntry, chatId = CHAT): Promise<void> {
-  await chatLog.append(chatId, entry)
+  await chatLog.append(chatKey('telegram', chatId), entry)
   idle.observe(chatId, entry)
 }
 async function runQueued(): Promise<void> {
@@ -77,13 +77,13 @@ describe('startIdle', () => {
     const idle = start(undefined, { queue: dispatcher })
     await idle.ready
     for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) dispatcher.enqueue(CHAT, () => say(idle, human(i + 1, m)))
-    await vi.waitFor(() => expect(decisions()).toEqual([{ action: 'reply', messageId: 5, text: 'hehe' }]))
+    await vi.waitFor(() => expect(decisions()).toEqual([{ action: 'reply', messageId: '5', text: 'hehe' }]))
     idle.stop()
   })
 
   it('neither loses nor double-counts lines written while the window is seeded', async () => {
-    for (const [i, m] of [4, 3, 2].entries()) await chatLog.append(CHAT, human(i + 1, m))
-    const snapshot = await chatLog.readAll(CHAT)
+    for (const [i, m] of [4, 3, 2].entries()) await chatLog.append(chatKey('telegram', CHAT), human(i + 1, m))
+    const snapshot = await chatLog.readAll(chatKey('telegram', CHAT))
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
     const slowLog = { readAll: async () => { await gate; return snapshot }, append: chatLog.append.bind(chatLog) }
@@ -91,7 +91,7 @@ describe('startIdle', () => {
     // Line 3 is in the snapshot but its event arrives late; line 4 is written after the snapshot was taken.
     idle.observe(CHAT, human(3, 2))
     const late = human(4, 1)
-    await chatLog.append(CHAT, late)
+    await chatLog.append(chatKey('telegram', CHAT), late)
     idle.observe(CHAT, late)
     release()
     await idle.ready
@@ -105,7 +105,7 @@ describe('startIdle', () => {
     const idle = start()
     await idle.ready
     for (const [i, m] of [4, 3, 2, 1].entries()) await say(idle, human(i + 1, m))
-    await say(idle, { ...human(9, 0.5), user_id: 1, bot: true })
+    await say(idle, { ...human(9, 0.5), user_id: '1', bot: true })
     idle.stop()
     expect(checks()).toEqual([])
   })
@@ -123,7 +123,7 @@ describe('startIdle', () => {
     idle.stop()
     expect(api.callsTo('sendMessage')[0]!.args).toEqual([CHAT, 'hehe', { replyTo: { messageId: 5 } }])
     expect(checks()).toEqual(['go'])
-    expect(decisions()).toEqual([{ action: 'reply', messageId: 5, text: 'hehe' }])
+    expect(decisions()).toEqual([{ action: 'reply', messageId: '5', text: 'hehe' }])
   })
 
   it('records the start once the windows are seeded, with the burst settings and without the persona', async () => {
@@ -156,7 +156,7 @@ describe('startIdle', () => {
   })
 
   it('seeds the window before evaluating', async () => {
-    for (const [i, m] of [4, 3, 2, 1].entries()) await chatLog.append(CHAT, human(i + 1, m))
+    for (const [i, m] of [4, 3, 2, 1].entries()) await chatLog.append(chatKey('telegram', CHAT), human(i + 1, m))
     const idle = start()
     await idle.ready
     await say(idle, human(5, 0.5))
@@ -179,7 +179,7 @@ describe('startIdle', () => {
     rejected.stop()
     expect(decisions()).toEqual([
       { action: 'error', error: 'model down' },
-      { action: 'react', messageId: 5, emoji: '\u{1F525}', error: 'REACTION_INVALID' },
+      { action: 'react', messageId: '5', emoji: '\u{1F525}', error: 'REACTION_INVALID' },
     ])
   })
 
@@ -211,7 +211,7 @@ describe('startIdle', () => {
       { type: 'text', text: '[photo of message 4]' },
       { type: 'image', attachment: { attachmentId: 'ref1-1' } },
     ])
-    expect(decisions()).toEqual([{ action: 'reply', messageId: 5, text: 'hehe' }])
+    expect(decisions()).toEqual([{ action: 'reply', messageId: '5', text: 'hehe' }])
   })
 
   it('decides from text alone when the call with photos fails', async () => {
@@ -236,8 +236,8 @@ describe('startIdle', () => {
 
   it('a corrupted chat log in one chat leaves the others working', async () => {
     const OTHER = -6
-    await mkdir(join(dir, 'log'), { recursive: true })
-    await writeFile(join(dir, 'log', `${OTHER}.jsonl`), '{not json\n', 'utf8')
+    await mkdir(join(dir, 'log', 'telegram', 'chatlog'), { recursive: true })
+    await writeFile(join(dir, 'log', 'telegram', 'chatlog', `${OTHER}.jsonl`), '{not json\n', 'utf8')
     const idle = start(undefined, { config: { ...base, chatIds: [OTHER, CHAT] } })
     await idle.ready
     for (const [i, m] of [4, 3, 2, 1, 0.5].entries()) await say(idle, human(i + 1, m))

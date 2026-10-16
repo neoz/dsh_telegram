@@ -1,10 +1,8 @@
 import { join } from 'node:path'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { oneLine, senderLabel, type ChatLog, type ChatLogEntry } from './chatlog.ts'
+import { chatKey, oneLine, renderMemoryBlock, senderLabel, type ChatAgents, type ChatLog, type ChatLogEntry, type MemoryStore } from 'dsh-chat'
 import type { Config } from './config.ts'
 import { hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, type TelegramMessage, type TelegramUser } from './inbound.ts'
-import { renderMemoryBlock, type MemoryStore } from './memory.ts'
-import type { ChatAgents } from './sessions.ts'
 import type { TelegramApi } from './telegram-api.ts'
 import { runTurn, type SessionEventFeed, type TurnResult } from './turn.ts'
 
@@ -76,7 +74,7 @@ function recentBlock(entries: ChatLogEntry[]): string {
 /** Chat plus global memory for the first turn of a session; undefined when reading failed, so the turn runs without it and the session stays unmarked. */
 async function memoryBlock(deps: BotDeps, chatId: number): Promise<string | undefined> {
   try {
-    const [chat, global] = await Promise.all([deps.memory.list({ kind: 'chat', chatId }), deps.memory.list({ kind: 'global' })])
+    const [chat, global] = await Promise.all([deps.memory.list({ kind: 'chat', key: chatKey('telegram', chatId) }), deps.memory.list({ kind: 'global' })])
     return renderMemoryBlock(chat, global)
   } catch (error) {
     deps.log.warn(`dsh-telegram: reading memory for chat ${chatId} failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -100,27 +98,33 @@ export interface ChatTurnInput {
 /** Resolves the chat's agent, runs one turn and logs the reply; shared by messages and prompts. */
 export async function runChatTurn(deps: BotDeps, input: ChatTurnInput): Promise<{ result: TurnResult; prepMs: number }> {
   const { chatId, messageId } = input
-  const resolved = await deps.agents.resolve(chatId)
+  const key = chatKey('telegram', chatId)
+  const resolved = await deps.agents.resolve(key)
   if (resolved.resumeFailed !== undefined) {
     await deps.api.sendMessage(chatId, 'The previous conversation could not be restored; starting a new one.')
   }
 
-  deps.agents.setTurn(chatId, { sender: input.sender, isGroup: input.isGroup })
+  const { sender } = input
+  deps.agents.setTurn(key, {
+    sender: { id: String(sender.id), name: sender.first_name, ...(sender.username === undefined ? {} : { username: sender.username }) },
+    isGroup: input.isGroup,
+    isSuperAdmin: deps.config.superAdmins.includes(sender.id),
+  })
 
   let text = input.text
   if (input.isGroup && messageId !== undefined) {
-    const recent = await deps.chatLog.recent(chatId, deps.agents.lastTurnMessageId(chatId), messageId, deps.config.recentMessagesLimit)
+    const recent = await deps.chatLog.recent(key, deps.agents.lastTurnMessageId(key), String(messageId), deps.config.recentMessagesLimit)
     if (recent.length > 0) text = `${recentBlock(recent)}
 
 ${text}`
   }
   // The memory block goes in front of the first user message of a session; later turns rely on memory_recall.
-  const sessionId = resolved.agent.id
-  const memoryText = deps.agents.memoryInjected(chatId, sessionId) ? '' : await memoryBlock(deps, chatId)
+  const sessionId = String(resolved.agent.id)
+  const memoryText = deps.agents.memoryInjected(key, sessionId) ? '' : await memoryBlock(deps, chatId)
   if (memoryText !== undefined && memoryText !== '') text = `${memoryText}
 
 ${text}`
-  if (messageId !== undefined) await deps.agents.markTurn(chatId, messageId)
+  if (messageId !== undefined) await deps.agents.markTurn(key, String(messageId))
 
   const content: ContentBlock[] = [{ type: 'text', text }]
   if (input.images.length > 0) {
@@ -129,8 +133,8 @@ ${text}`
   }
 
   const prepMs = Date.now() - input.startedAt
-  if (memoryText !== undefined) await deps.agents.markMemoryInjected(chatId, sessionId)
-  const workspaceDir = deps.agents.workspaceFor(chatId)
+  if (memoryText !== undefined) await deps.agents.markMemoryInjected(key, sessionId)
+  const workspaceDir = deps.agents.workspaceFor(key)
   const result = await runTurn({
     api: deps.api,
     agent: resolved.agent,
@@ -147,13 +151,13 @@ ${text}`
   })
 
   if (result.text !== '') {
-    await deps.chatLog.append(chatId, {
+    await deps.chatLog.append(key, {
       ts: new Date().toISOString(),
-      message_id: result.sentMessageId ?? 0,
-      user_id: deps.botId,
+      message_id: result.sentMessageId === undefined ? '' : String(result.sentMessageId),
+      user_id: String(deps.botId),
       name: deps.botUsername,
       text: result.text,
-      ...(messageId === undefined ? {} : { reply_to: messageId }),
+      ...(messageId === undefined ? {} : { reply_to: String(messageId) }),
       bot: true,
     })
   }
@@ -176,24 +180,25 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   const verdict = gate(message, { allowFrom: deps.config.allowFrom, botId: deps.botId, botUsername: deps.botUsername })
   if (verdict === 'ignore') return
   const chatId = message.chat.id
+  const key = chatKey('telegram', chatId)
   if (verdict === 'log-only') {
-    const saved = await saveObservedPhoto(message, deps.api, join(deps.agents.workspaceFor(chatId), 'inbox')).catch((error: unknown) => {
+    const saved = await saveObservedPhoto(message, deps.api, join(deps.agents.workspaceFor(key), 'inbox')).catch((error: unknown) => {
       deps.log.warn(`dsh-telegram: saving photo of message ${message.message_id} in chat ${chatId} failed: ${error instanceof Error ? error.message : String(error)}`)
       return []
     })
-    await deps.chatLog.append(chatId, logEntryFor(message, saved))
+    await deps.chatLog.append(key, logEntryFor(message, saved))
     return
   }
 
   const command = commandFrom(message, deps)
   if (command === 'reset') {
-    await deps.agents.reset(chatId)
+    await deps.agents.reset(key)
     await deps.api.sendMessage(chatId, 'Started a new conversation.')
     return
   }
   if (command === 'stop') {
     // A cancelled turn reports "Stopped." on its own placeholder; only an idle agent needs a reply here.
-    if (!deps.agents.stop(chatId)) await deps.api.sendMessage(chatId, 'Nothing is running.')
+    if (!deps.agents.stop(key)) await deps.api.sendMessage(chatId, 'Nothing is running.')
     return
   }
   if (command === 'help') {
@@ -205,11 +210,11 @@ export async function handleMessage(message: TelegramMessage, deps: BotDeps): Pr
   // Telegram stamps `date` when the sender hit send; the gap to now is delivery lag outside this process.
   const receivedAt = Date.now()
   const lagMs = Math.max(0, receivedAt - message.date * 1000)
-  const workspaceDir = deps.agents.workspaceFor(chatId)
+  const workspaceDir = deps.agents.workspaceFor(key)
   const inbound = await parseInbound(message, {
     api: deps.api, inboxDir: join(workspaceDir, 'inbox'), botId: deps.botId, botUsername: deps.botUsername,
   })
-  await deps.chatLog.append(chatId, { ...inbound.logEntry, handled: true })
+  await deps.chatLog.append(key, { ...inbound.logEntry, handled: true })
   // The reaction is a courtesy; a chat with reactions disabled must still get its answer.
   await deps.api.setReaction(chatId, message.message_id, ACK_REACTION).catch((error: unknown) => {
     deps.log.warn(`dsh-telegram: chat ${chatId} acknowledgement reaction failed (${String(error)})`)
