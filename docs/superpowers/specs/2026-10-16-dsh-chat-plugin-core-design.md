@@ -44,7 +44,7 @@ This supersedes the "Code sharing" decision of
 | `dsh-chat/log` | `chatLog` | `chatData` | JSONL chat log per `chatKey`; forwards appends as `chat/message`, a throwing listener only warns. |
 | `dsh-chat/memory` | `chatMemory` | `chatData`, `chatAgents` | Memory store, `memory_save` / `memory_recall` / `memory_forget`, the `<memory>` block. |
 | `dsh-chat/sessions` | `chatAgents` | `chatData`, `agents` | Session map and `ChatAgents`: create or resume one agent per `chatKey`, per-chat workspace, turn context. |
-| `dsh-chat` (router) | `chat` | `chatLog`, `chatMemory`, `chatAgents`, `attachments`, `loader` | Channel registry, per-`chatKey` queue, shared gate (allowlist, `/reset`, `/stop`, `/help`), turn orchestration, `chat/turn`. |
+| `dsh-chat` (router) | `chat` | `chatLog`, `chatMemory`, `chatAgents`, `attachments` | Channel registry, per-`chatKey` queue, shared gate (allowlist, `/reset`, `/stop`, `/help`), turn orchestration, `chat/turn`. |
 | `dsh-chat/history` | — | `chatLog`, `chatAgents` | `chat_history` tool (replaces `telegram_chat_history`). |
 | `dsh-chat/retention` | — | `chatData` | Daily sweep of `inbox` / `outbox` under `/workspace/<channel>/<id>`. |
 | `dsh-chat/idle` | — | `chat`, `chatLog`, `llm`, `attachments` | Moved from `dsh-telegram/idle`. |
