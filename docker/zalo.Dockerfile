@@ -21,8 +21,6 @@ RUN apt-get update \
 ENV DSH_HOME=/dsh-home
 # User skills live in the volume so they survive container recreation.
 ENV DSH_AGENTS_HOME=/dsh-home/.agents
-# Skill scripts run on the venv the entrypoint keeps in the volume, so packages pip installs survive image rebuilds.
-ENV PATH=/dsh-home/.venv/bin:$PATH
 ENV DSH_PROFILE=zalo
 # The profile template lives outside the volume so image rebuilds refresh it.
 COPY profile/zalo/ /opt/dsh-zalo/profile/

@@ -14,7 +14,10 @@ case "$PROFILE" in
   *[!a-z0-9-]*) echo "entrypoint: invalid DSH_PROFILE '$PROFILE'" >&2; exit 1 ;;
 esac
 mkdir -p "$DSH_HOME/profiles" "$DSH_AGENTS_HOME/skills"
+# Skill scripts get a pip venv in the volume, so installed packages survive image rebuilds.
+# It joins PATH only here, after the drop to node: node can write it, so root must never search it.
 [ -x "$DSH_HOME/.venv/bin/python3" ] || python3 -m venv "$DSH_HOME/.venv"
+export PATH="$DSH_HOME/.venv/bin:$PATH"
 rm -rf "$DSH_HOME/profiles/$PROFILE"
 cp -R "/opt/dsh-$PROFILE/profile" "$DSH_HOME/profiles/$PROFILE"
 exec "$@"

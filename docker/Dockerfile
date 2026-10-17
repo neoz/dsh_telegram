@@ -21,8 +21,6 @@ RUN apt-get update \
 ENV DSH_HOME=/dsh-home
 # User skills live in the volume so they survive container recreation.
 ENV DSH_AGENTS_HOME=/dsh-home/.agents
-# Skill scripts run on the venv the entrypoint keeps in the volume, so packages pip installs survive image rebuilds.
-ENV PATH=/dsh-home/.venv/bin:$PATH
 # The profile template lives outside the volume so image rebuilds refresh it.
 COPY profile/telegram/ /opt/dsh-telegram/profile/
 COPY --from=builder /out/dsh-chat /opt/dsh-telegram/profile/node_modules/dsh-chat
