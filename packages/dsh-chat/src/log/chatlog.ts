@@ -17,9 +17,12 @@ export interface ChatLogEntry {
   handled?: true
 }
 
-/** Folds line breaks so text rendered as one line of a block cannot forge another line (e.g. a fake sender). */
+/** Tags that fence untrusted text in prompts; a lookalike bracket keeps text from opening or closing one. */
+const FENCE_TAG = /<(\/?)(group_messages|chat_history|memory)\b/gi
+
+/** Folds line breaks so text rendered as one line of a block cannot forge another line (e.g. a fake sender), and defuses fence tags. */
 export function oneLine(text: string): string {
-  return text.replace(/\r?\n/g, ' ')
+  return text.replace(/\r?\n/g, ' ').replace(FENCE_TAG, '‹$1$2')
 }
 
 export function senderLabel(entry: Pick<ChatLogEntry, 'user_id' | 'username' | 'name' | 'bot'>): string {
