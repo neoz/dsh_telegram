@@ -15,12 +15,14 @@ RUN pnpm --filter dsh-chat --filter dsh-telegram run build \
 FROM node:22-bookworm-slim
 ARG DSH_VERSION=0.2.0-rc.2
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
+ && apt-get install -y --no-install-recommends ca-certificates git ripgrep python3 python3-venv \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g @deepseek-ai/dsh@${DSH_VERSION}
 ENV DSH_HOME=/dsh-home
 # User skills live in the volume so they survive container recreation.
 ENV DSH_AGENTS_HOME=/dsh-home/.agents
+# Skill scripts run on the venv the entrypoint keeps in the volume, so packages pip installs survive image rebuilds.
+ENV PATH=/dsh-home/.venv/bin:$PATH
 # The profile template lives outside the volume so image rebuilds refresh it.
 COPY profile/telegram/ /opt/dsh-telegram/profile/
 COPY --from=builder /out/dsh-chat /opt/dsh-telegram/profile/node_modules/dsh-chat

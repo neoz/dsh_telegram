@@ -14,6 +14,7 @@ case "$PROFILE" in
   *[!a-z0-9-]*) echo "entrypoint: invalid DSH_PROFILE '$PROFILE'" >&2; exit 1 ;;
 esac
 mkdir -p "$DSH_HOME/profiles" "$DSH_AGENTS_HOME/skills"
+[ -x "$DSH_HOME/.venv/bin/python3" ] || python3 -m venv "$DSH_HOME/.venv"
 rm -rf "$DSH_HOME/profiles/$PROFILE"
 cp -R "/opt/dsh-$PROFILE/profile" "$DSH_HOME/profiles/$PROFILE"
 exec "$@"

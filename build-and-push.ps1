@@ -19,7 +19,8 @@ $Images = @(
 
 # Ensure QEMU is set up for cross-platform builds
 Write-Host "Setting up QEMU for cross-platform builds ..." -ForegroundColor Cyan
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes >$null
+# tonistiigi/binfmt ships a current QEMU; the old multiarch/qemu-user-static one segfaults in python3's install scripts.
+docker run --rm --privileged tonistiigi/binfmt --install arm64 >$null
 
 # Build everything first, so a failed build never leaves the registry with only some images updated.
 foreach ($entry in $Images) {
