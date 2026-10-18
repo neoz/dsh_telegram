@@ -13,7 +13,7 @@ RUN pnpm --filter dsh-chat --filter dsh-telegram run build \
  && pnpm --filter dsh-telegram deploy --legacy --prod --config.auto-install-peers=false /out/dsh-telegram
 
 FROM node:22-bookworm-slim
-ARG DSH_VERSION=0.2.0-rc.2
+ARG DSH_VERSION=0.2.1-rc.2
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git ripgrep python3 python3-venv \
  && rm -rf /var/lib/apt/lists/* \
