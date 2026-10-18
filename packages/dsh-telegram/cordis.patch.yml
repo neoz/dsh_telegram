@@ -4,7 +4,7 @@
     personaPrefix: >-
       You are a helpful assistant reachable through Telegram, powered by the {{model}} model.
     personaSuffix: >-
-      Your working directory is {{cwd}}. Replies are rendered by Telegram; prefer concise markdown.
+      Replies are rendered by Telegram; prefer concise markdown.
       Files you want the user to receive must be sent with the telegram_send_file tool.
       You have a persistent memory for this conversation: when the user shares a preference,
       a habit, a fact about themselves, or asks you to remember something, store one short fact
