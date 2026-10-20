@@ -84,7 +84,7 @@ describe('profile patch', () => {
 })
 
 describe('dsh-chat rows', () => {
-  const ids = ['chat-migrate', 'chat-log', 'chat-memory', 'chat-sessions', 'chat-history', 'chat-retention']
+  const ids = ['chat-migrate', 'chat-log', 'chat-memory', 'chat-sessions', 'chat-history', 'chat-retention', 'chat-video']
 
   it('inserts every dsh-chat plugin before the bot row', async () => {
     const list = await rows('../cordis.patch.yml')

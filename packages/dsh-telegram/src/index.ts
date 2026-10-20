@@ -7,6 +7,7 @@ import { autoRetry } from '@grammyjs/auto-retry'
 import { run, type RunnerHandle } from '@grammyjs/runner'
 import { chatKey, idIn } from 'dsh-chat'
 import type {} from 'dsh-chat/sessions'
+import type {} from 'dsh-chat/video'
 import { Bot } from 'grammy'
 import { createTelegramChannel } from './channel.ts'
 import { Config } from './config.ts'
@@ -58,7 +59,7 @@ async function start(ctx: Context, config: Config): Promise<Started> {
   }))
   bot.on('message', (update) => {
     const inbound = toInbound(update.message as unknown as TelegramMessage, {
-      api, botId, botUsername, log, inboxFor: chatId => join(workspaceOf(chatId), 'inbox'),
+      api, botId, botUsername, log, inboxFor: chatId => join(workspaceOf(chatId), 'inbox'), video: ctx.get('chatVideo'),
     })
     if (inbound !== undefined) ctx.chat.inbound(inbound)
   })

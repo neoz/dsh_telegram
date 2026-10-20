@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { displayName, hasBotMention, logEntryFor, parseInbound, saveObservedPhoto, stripBotMention, toInbound, type TelegramMessage } from '../src/inbound.ts'
 import { ACK_REACTION } from '../src/channel.ts'
@@ -15,7 +15,7 @@ beforeEach(async () => {
 afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 
 const ann = { id: 7, is_bot: false, username: 'ann', first_name: 'Ann' }
-const options = () => ({ api, inboxDir: join(dir, 'inbox'), botId: 1, botUsername: 'dshbot' })
+const options = () => ({ api, inboxDir: join(dir, 'inbox'), botId: 1, botUsername: 'dshbot', log: { warn: () => {} } })
 
 function msg(extra: Partial<TelegramMessage>, type: TelegramMessage['chat']['type'] = 'private'): TelegramMessage {
   return { message_id: 10, date: 1_700_000_000, chat: { id: 5, type }, from: ann, ...extra }
@@ -142,6 +142,55 @@ describe('parseInbound', () => {
     const got = await parseInbound(msg({ text: 'more', reply_to_message: botQuoted }), options())
     expect(api.callsTo('downloadFile')).toHaveLength(0)
     expect(got.text).toBe('> assistant: answer\n\nmore')
+  })
+})
+
+describe('videos', () => {
+  const frame = { data: Buffer.from('frame'), mediaType: 'image/jpeg' as const }
+  const thumb = { file_id: 't', file_unique_id: 'ut' }
+  const clip = { file_id: 'v', file_unique_id: 'uv', duration: 83, file_size: 1000, thumbnail: thumb }
+  const video = (frames: typeof frame[] | Error) => {
+    const calls: string[] = []
+    return { calls, frames: async (path: string) => { calls.push(path); if (frames instanceof Error) throw frames; return frames } }
+  }
+  beforeEach(() => {
+    api.files.set('v', { data: Buffer.from('mp4'), filePath: 'videos/1.mp4' })
+    api.files.set('t', { data: Buffer.from('thumb'), filePath: 'thumbs/1.jpg' })
+  })
+
+  it('turns a video into ordered stills and keeps the clip in the inbox', async () => {
+    const plugin = video([frame, frame])
+    const got = await parseInbound(msg({ caption: 'look', video: clip }), { ...options(), video: plugin })
+    const path = got.savedFiles[0]!
+    expect(dirname(path)).toBe(join(dir, 'inbox', 'uv'))
+    expect(plugin.calls).toEqual([path])
+    expect(path).toMatch(/\.mp4$/)
+    expect(got.images).toEqual([frame, frame])
+    expect(got.text).toBe(`look\n[video 1:23, 2 frames in order: ${path}]`)
+    expect(got.logEntry.media).toEqual([path])
+  })
+
+  it('shows the thumbnail of a quoted gif too large to download', async () => {
+    const plugin = video([frame])
+    const quoted: TelegramMessage = { message_id: 3, date: 1, chat: { id: 5, type: 'group' }, from: { id: 9, is_bot: false, first_name: 'Bob' }, animation: { ...clip, file_size: 30 * 1024 * 1024 } }
+    const got = await parseInbound(msg({ text: 'seen it?', reply_to_message: quoted }), { ...options(), video: plugin })
+    expect(plugin.calls).toEqual([])
+    expect(api.callsTo('downloadFile').map(c => c.args[0])).toEqual(['t'])
+    expect(got.images).toEqual([{ data: Buffer.from('thumb'), mediaType: 'image/jpeg' }])
+    expect(got.text).toBe('> id:9 (Bob): [gif 1:23, thumbnail only]\n\nseen it?')
+  })
+
+  it('falls back to the thumbnail when frames fail or no video plugin runs', async () => {
+    const warnings: string[] = []
+    const got = await parseInbound(msg({ video_note: clip }), { ...options(), video: video(new Error('ffmpeg missing')), log: { warn: m => warnings.push(m) } })
+    expect(got.text).toBe('[video note 1:23, thumbnail only]')
+    expect(warnings[0]).toContain('ffmpeg missing')
+    const plain = await parseInbound(msg({ video: { ...clip, thumbnail: undefined } }), options())
+    expect(plain.text).toBe('[video 1:23, not viewable]')
+  })
+
+  it('logs a bare video with its kind', () => {
+    expect(logEntryFor(msg({ video: clip })).text).toBe('[video]')
   })
 })
 

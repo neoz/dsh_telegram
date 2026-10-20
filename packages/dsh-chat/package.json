@@ -68,6 +68,7 @@
     "./idle": { "types": "./lib/idle/index.d.ts", "default": "./lib/idle/index.js" },
     "./schedule": { "types": "./lib/schedule/index.d.ts", "default": "./lib/schedule/index.js" },
     "./skills": { "types": "./lib/skills/index.d.ts", "default": "./lib/skills/index.js" },
+    "./video": { "types": "./lib/video/index.d.ts", "default": "./lib/video/index.js" },
     "./package.json": "./package.json"
   }
 }

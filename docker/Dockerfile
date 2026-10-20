@@ -15,7 +15,7 @@ RUN pnpm --filter dsh-chat --filter dsh-telegram run build \
 FROM node:22-bookworm-slim
 ARG DSH_VERSION=0.2.1-rc.2
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git ripgrep python3 python3-venv \
+ && apt-get install -y --no-install-recommends ca-certificates ffmpeg git ripgrep python3 python3-venv \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g @deepseek-ai/dsh@${DSH_VERSION}
 ENV DSH_HOME=/dsh-home

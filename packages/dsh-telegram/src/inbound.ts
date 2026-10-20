@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { chatKey, type ChatLogEntry, type InboundMessage as ChatInbound } from 'dsh-chat'
+import type { ChatVideo } from 'dsh-chat/video'
 import { ACK_REACTION } from './channel.ts'
 import { sanitizeFilename } from './media.ts'
 import type { TelegramApi } from './telegram-api.ts'
@@ -9,6 +10,7 @@ export interface TelegramUser { id: number; is_bot: boolean; username?: string; 
 interface Entity { type: string; offset: number; length: number }
 /** `file_unique_id` stays the same for one file across messages and bots, unlike `file_id`. */
 interface FileRef { file_id: string; file_unique_id: string }
+interface VideoRef extends FileRef { duration: number; file_size?: number; thumbnail?: FileRef }
 
 /** The subset of a Telegram message the parser reads; grammY's Message satisfies it structurally. */
 export interface TelegramMessage {
@@ -24,11 +26,14 @@ export interface TelegramMessage {
   document?: FileRef & { file_name?: string; mime_type?: string }
   voice?: FileRef
   audio?: FileRef & { file_name?: string }
+  video?: VideoRef
+  animation?: VideoRef
+  video_note?: VideoRef
   sticker?: { emoji?: string }
   reply_to_message?: TelegramMessage
 }
 
-export interface InboundImage { data: Buffer; mediaType: 'image/jpeg' }
+export interface InboundImage { data: Uint8Array; mediaType: 'image/jpeg' }
 
 export interface InboundMessage {
   chatId: number
@@ -41,7 +46,15 @@ export interface InboundMessage {
   logEntry: ChatLogEntry
 }
 
-export interface ParseOptions { api: TelegramApi; inboxDir: string; botId: number; botUsername: string }
+export interface ParseOptions {
+  api: TelegramApi
+  inboxDir: string
+  botId: number
+  botUsername: string
+  /** Absent when no video plugin runs; videos then show their thumbnail only. */
+  video?: ChatVideo | undefined
+  log: { warn(msg: string): void }
+}
 
 export function hasBotMention(text: string | undefined, entities: Entity[] | undefined, botUsername: string): boolean {
   if (text === undefined || entities === undefined) return false
@@ -101,6 +114,41 @@ export async function saveObservedPhoto(message: TelegramMessage, api: TelegramA
   return photo === undefined ? [] : [await saveInbox(api, inboxDir, photo, 'photo.jpg', '.jpg')]
 }
 
+const VIDEO_KINDS = [['video', 'video'], ['animation', 'gif'], ['video_note', 'video note']] as const
+/** The Bot API refuses to download larger files. */
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+
+function videoOf(message: TelegramMessage): { kind: string; file: VideoRef } | undefined {
+  for (const [field, kind] of VIDEO_KINDS) {
+    const file = message[field]
+    if (file !== undefined) return { kind, file }
+  }
+  return undefined
+}
+
+function clock(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+/** Stills of the message's video and its marker; the thumbnail stands in when the clip cannot be downloaded or cut. */
+async function loadVideo(message: TelegramMessage, options: ParseOptions): Promise<{ images: InboundImage[]; marker: string; path?: string } | undefined> {
+  const found = videoOf(message)
+  if (found === undefined) return undefined
+  const { kind, file } = found
+  const label = `${kind} ${clock(file.duration)}`
+  if (options.video !== undefined && (file.file_size ?? 0) <= MAX_DOWNLOAD_BYTES) {
+    try {
+      const path = await saveInbox(options.api, options.inboxDir, file, undefined, '.mp4')
+      const images = (await options.video.frames(path)).map(i => ({ data: i.data, mediaType: 'image/jpeg' as const }))
+      if (images.length > 0) return { images, marker: `[${label}, ${images.length} frames in order: ${path}]`, path }
+    } catch (error) {
+      options.log.warn(`dsh-telegram: frames of ${kind} ${file.file_unique_id} failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (file.thumbnail === undefined) return { images: [], marker: `[${label}, not viewable]` }
+  return { images: [await loadPhoto(options.api, options.inboxDir, file.thumbnail)], marker: `[${label}, thumbnail only]` }
+}
+
 /** Saves the message's document, voice and audio into the inbox; returns the paths and their text markers. */
 async function saveMedia(message: TelegramMessage, api: TelegramApi, inboxDir: string): Promise<{ paths: string[]; markers: string[] }> {
   const paths: string[] = []
@@ -121,13 +169,14 @@ export function logEntryFor(message: TelegramMessage, savedFiles: string[] = [])
   const sender = message.from
   if (sender === undefined) throw new Error('message without sender')
   const text = bodyText(message)
+  const video = videoOf(message)
   return {
     ts: new Date(message.date * 1000).toISOString(),
     message_id: String(message.message_id),
     user_id: String(sender.id),
     ...(sender.username === undefined ? {} : { username: sender.username }),
     name: sender.first_name,
-    text: text !== '' ? text : message.sticker !== undefined ? stickerMarker(message.sticker) : message.photo !== undefined ? '[photo]' : '',
+    text: text !== '' ? text : message.sticker !== undefined ? stickerMarker(message.sticker) : message.photo !== undefined ? '[photo]' : video !== undefined ? `[${video.kind}]` : '',
     ...(message.reply_to_message === undefined ? {} : { reply_to: String(message.reply_to_message.message_id) }),
     ...(savedFiles.length === 0 ? {} : { media: savedFiles }),
   }
@@ -150,6 +199,12 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
   const media = await saveMedia(message, options.api, options.inboxDir)
   savedFiles.push(...media.paths)
   parts.push(...media.markers)
+  const video = await loadVideo(message, options)
+  if (video !== undefined) {
+    images.push(...video.images)
+    if (video.path !== undefined) savedFiles.push(video.path)
+    parts.push(video.marker)
+  }
   if (message.sticker !== undefined) parts.push(stickerMarker(message.sticker))
 
   let text = parts.join('\n')
@@ -167,7 +222,9 @@ export async function parseInbound(message: TelegramMessage, options: ParseOptio
     }
     if (!fromBot) {
       const quotedMedia = await saveMedia(quoted, options.api, options.inboxDir)
-      quotedText = [quotedText, ...quotedMedia.markers].filter(t => t !== '').join('\n')
+      const quotedVideo = await loadVideo(quoted, options)
+      if (quotedVideo !== undefined) images.push(...quotedVideo.images)
+      quotedText = [quotedText, ...quotedMedia.markers, quotedVideo?.marker ?? ''].filter(t => t !== '').join('\n')
     }
     const label = fromBot ? 'assistant' : displayName(quoted.from)
     const block = quotedText.split('\n').map((line, i) => (i === 0 ? `> ${label}: ${line}` : `> ${line}`)).join('\n')
@@ -182,6 +239,7 @@ export interface ToInboundDeps {
   botId: number
   botUsername: string
   inboxFor(chatId: number): string
+  video?: ChatVideo | undefined
   log: { warn(msg: string): void }
 }
 
@@ -219,7 +277,7 @@ export function toInbound(message: TelegramMessage, deps: ToInboundDeps): ChatIn
         })
         return { logEntry: logEntryFor(message, saved), text: '', images: [] }
       }
-      const parsed = await parseInbound(message, { api: deps.api, inboxDir, botId: deps.botId, botUsername: deps.botUsername })
+      const parsed = await parseInbound(message, { api: deps.api, inboxDir, botId: deps.botId, botUsername: deps.botUsername, video: deps.video, log: deps.log })
       // Acked as soon as the message is in hand, before the agent is resolved; a chat with reactions disabled must still get its answer.
       await deps.api.setReaction(message.chat.id, message.message_id, ACK_REACTION).catch((error: unknown) => {
         deps.log.warn(`dsh-telegram: chat ${message.chat.id} acknowledgement reaction failed (${String(error)})`)

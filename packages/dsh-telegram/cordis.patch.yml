@@ -63,6 +63,10 @@
     - id: chat-retention
       name: dsh-chat/retention
 
+    # Video stills need ffmpeg on PATH; without this row videos show their thumbnail only.
+    - id: chat-video
+      name: dsh-chat/video
+
     - id: telegram
       name: dsh-telegram
       config:
