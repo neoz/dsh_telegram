@@ -26,7 +26,7 @@ docker run --rm --privileged tonistiigi/binfmt --install arm64 >$null
 foreach ($entry in $Images) {
     $FullImage = "$Registry/$Owner/$($entry.Image):latest"
     Write-Host "Building $FullImage ..." -ForegroundColor Cyan
-    docker buildx build --platform linux/arm64 --provenance=false -f $entry.Dockerfile -t $FullImage --load .
+    docker buildx build --platform linux/arm64 --provenance=false --pull -f $entry.Dockerfile -t $FullImage --load .
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Build of $FullImage failed." -ForegroundColor Red
         exit 1
